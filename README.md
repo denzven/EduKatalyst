@@ -1,5 +1,7 @@
 # EduKatalyst by DZVN
 
+[![EduKatalyst Banner](public/banner.png)](https://denzven.github.io/EduKatalyst)
+
 > **"Katalyze the Change"**  
 > *By students. For students.*
 
