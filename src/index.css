@@ -1,0 +1,333 @@
+@import "tailwindcss";
+
+/* 
+ * 6 Curated Theme Presets (Inspired by Modern Design Systems):
+ * 1. Golden Peachy Glow (Dark Default)
+ * 2. Sunshine Radiance (Radiant Amber Light)
+ * 3. Sakura Blossom (Radiant Pastel Light)
+ * 4. Mint Breeze (Radiant Mint Light)
+ * 5. Nordic Dusk (Sapphire Steel Dark)
+ * 6. Tokyo Pastel (Cyber Synth Dark)
+ */
+
+/* Preset 1: Golden Peachy Glow (Dark Default) */
+html.theme-peachy_glow, html.dark:not([class*="theme-"]) {
+  --bg-ground: #1F1215;
+  --bg-surface: #3E2428;
+  --bg-surface-hover: #543036;
+  --bg-surface-active: #723D46;
+  --border-color: #723D46;
+  
+  --text-primary: #FFE1A8;
+  --text-secondary: #F4D9B8;
+  --text-muted: #C9CBA3;
+  
+  --accent-coral: #E26D5C;
+  --accent-peach: #FFE1A8;
+  --accent-sage: #C9CBA3;
+  --accent-plum: #723D46;
+  --accent-mauve: #472D30;
+
+  --shadow-glow: rgba(226, 109, 92, 0.25);
+  --code-bg: #190E11;
+}
+
+/* Preset 2: Sunshine Radiance (Radiant Amber Light) */
+html.theme-sunshine_radiance {
+  --bg-ground: #FAF4E6;
+  --bg-surface: #FFFFFF;
+  --bg-surface-hover: #FFF3D6;
+  --bg-surface-active: #FFE6A7;
+  --border-color: #FB8500;
+  
+  --text-primary: #1D2D44;
+  --text-secondary: #455E7A;
+  --text-muted: #5C6B73;
+  
+  --accent-coral: #FB8500;
+  --accent-peach: #FFB703;
+  --accent-sage: #E63946;
+  --accent-plum: #455E7A;
+  --accent-mauve: #1D2D44;
+
+  --shadow-glow: rgba(251, 133, 0, 0.2);
+  --code-bg: #FFF3D6;
+}
+
+/* Preset 3: Sakura Blossom (Radiant Pastel Light) */
+html.theme-sakura_blossom {
+  --bg-ground: #FDF2F8;
+  --bg-surface: #FFFFFF;
+  --bg-surface-hover: #FCE7F3;
+  --bg-surface-active: #FBCFE8;
+  --border-color: #F472B6;
+  
+  --text-primary: #3B0764;
+  --text-secondary: #6B21A8;
+  --text-muted: #86198F;
+  
+  --accent-coral: #EC4899;
+  --accent-peach: #F472B6;
+  --accent-sage: #C026D3;
+  --accent-plum: #6B21A8;
+  --accent-mauve: #3B0764;
+
+  --shadow-glow: rgba(236, 72, 153, 0.2);
+  --code-bg: #FCE7F3;
+}
+
+/* Preset 4: Mint Breeze (Radiant Mint Light) */
+html.theme-mint_breeze {
+  --bg-ground: #F0FDF4;
+  --bg-surface: #FFFFFF;
+  --bg-surface-hover: #DCFCE7;
+  --bg-surface-active: #BBF7D0;
+  --border-color: #4ADE80;
+  
+  --text-primary: #0F172A;
+  --text-secondary: #334155;
+  --text-muted: #0D9488;
+  
+  --accent-coral: #0D9488;
+  --accent-peach: #F59E0B;
+  --accent-sage: #4ADE80;
+  --accent-plum: #334155;
+  --accent-mauve: #0F172A;
+
+  --shadow-glow: rgba(13, 148, 136, 0.2);
+  --code-bg: #DCFCE7;
+}
+
+/* Preset 5: Nordic Dusk (Sapphire Steel Dark) */
+html.theme-nordic_dusk {
+  --bg-ground: #1B222D;
+  --bg-surface: #242D3C;
+  --bg-surface-hover: #2E3A4E;
+  --bg-surface-active: #354359;
+  --border-color: #354359;
+  
+  --text-primary: #F8FAFC;
+  --text-secondary: #E2E8F0;
+  --text-muted: #94A3B8;
+  
+  --accent-coral: #78C4D4;
+  --accent-peach: #E06D75;
+  --accent-sage: #78C4D4;
+  --accent-plum: #354359;
+  --accent-mauve: #1B222D;
+
+  --shadow-glow: rgba(120, 196, 212, 0.25);
+  --code-bg: #141A23;
+}
+
+/* Preset 6: Tokyo Pastel (Cyber Synth Dark) */
+html.theme-tokyo_pastel {
+  --bg-ground: #181824;
+  --bg-surface: #242335;
+  --bg-surface-hover: #302E46;
+  --bg-surface-active: #3A3852;
+  --border-color: #3A3852;
+  
+  --text-primary: #E2E8F0;
+  --text-secondary: #CBD5E1;
+  --text-muted: #D8B4FE;
+  
+  --accent-coral: #F472B6;
+  --accent-peach: #D8B4FE;
+  --accent-sage: #CBD5E1;
+  --accent-plum: #3A3852;
+  --accent-mauve: #181824;
+
+  --shadow-glow: rgba(244, 114, 182, 0.25);
+  --code-bg: #12121C;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--bg-ground);
+    color: var(--text-primary);
+    font-family: 'Inter', sans-serif;
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+  }
+
+  code, pre {
+    font-family: 'JetBrains Mono', monospace;
+  }
+}
+
+/* Animations & Keyframes */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { 
+    opacity: 0; 
+    transform: translateY(14px); 
+  }
+  to { 
+    opacity: 1; 
+    transform: translateY(0); 
+  }
+}
+
+@keyframes scaleIn {
+  from { 
+    opacity: 0; 
+    transform: scale(0.96); 
+  }
+  to { 
+    opacity: 1; 
+    transform: scale(1); 
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Custom Scrollbar for Theme Engine */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-ground);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-coral);
+}
+
+/* Distinct Theme Class Helpers */
+.badge-sage {
+  background-color: rgba(201, 203, 163, 0.18);
+  border: 1px solid var(--accent-sage);
+  color: var(--accent-sage);
+}
+
+.badge-peach {
+  background-color: rgba(255, 225, 168, 0.18);
+  border: 1px solid var(--accent-peach);
+  color: var(--accent-peach);
+}
+
+.badge-coral {
+  background-color: rgba(226, 109, 92, 0.2);
+  border: 1px solid var(--accent-coral);
+  color: var(--accent-coral);
+}
+
+/* Card Surface Utilities */
+.katalyst-card {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  transition: all 0.25s ease;
+}
+
+.katalyst-card-hover:hover {
+  border-color: var(--accent-coral);
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px -5px var(--shadow-glow);
+}
+
+/* Markdown Rendering Engine Overrides */
+.markdown-body h1 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid var(--border-color);
+  font-family: 'Plus Jakarta Sans', sans-serif;
+}
+
+.markdown-body h2 {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--accent-coral);
+  margin-top: 0.85rem;
+  margin-bottom: 0.4rem;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+}
+
+.markdown-body h3 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-top: 0.75rem;
+  margin-bottom: 0.3rem;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+}
+
+.markdown-body p {
+  margin-bottom: 0.6rem;
+  color: var(--text-primary);
+  line-height: 1.6;
+}
+
+.markdown-body ul, .markdown-body ol {
+  margin-bottom: 0.6rem;
+  padding-left: 1.25rem;
+}
+
+.markdown-body ul {
+  list-style-type: disc;
+}
+
+.markdown-body ol {
+  list-style-type: decimal;
+}
+
+.markdown-body li {
+  margin-bottom: 0.25rem;
+  color: var(--text-muted);
+}
+
+.markdown-body blockquote {
+  border-left: 3px solid var(--accent-coral);
+  background-color: var(--bg-ground);
+  padding: 0.6rem 0.85rem;
+  border-radius: 0.5rem;
+  margin-bottom: 0.75rem;
+  color: var(--accent-peach);
+}
+
+.markdown-body pre {
+  background-color: var(--code-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 0.75rem;
+  padding: 0.85rem;
+  overflow-x: auto;
+  margin-bottom: 0.75rem;
+}
+
+.markdown-body code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  color: var(--accent-coral);
+}
