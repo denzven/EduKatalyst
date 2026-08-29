@@ -9,16 +9,36 @@ import {
   FileArchive,
   CheckCircle2,
   AlertCircle,
-  Cloud
+  Cloud,
+  Eye,
+  X
 } from 'lucide-react';
 import { deleteVideoSession, clearAllSessions, saveVideoSession } from '../utils/storage';
 import { exportSessionToZip, importSessionFromZip, exportMasterBundle } from '../utils/zipHelper';
+import VideoPlayer from './VideoPlayer';
 
-export default function VideoLibrary({ sessions, onRefreshSessions, onSelectSession, onOpenCloudSync }) {
+export default function VideoLibrary({ 
+  sessions, 
+  onRefreshSessions, 
+  onSelectSession, 
+  onSelectSessionForPlayer,
+  onOpenCloudSync 
+}) {
   const [importStatus, setImportStatus] = useState(null);
   const [isImporting, setIsImporting] = useState(false);
   const [isExportingMaster, setIsExportingMaster] = useState(false);
+  const [activePreviewSession, setActivePreviewSession] = useState(null);
   const zipInputRef = useRef(null);
+
+  const handleSelectSession = (id) => {
+    const fn = onSelectSession || onSelectSessionForPlayer;
+    fn?.(id);
+  };
+
+  const handlePlayPreview = (session, e) => {
+    e.stopPropagation();
+    setActivePreviewSession(session);
+  };
 
   const handleDelete = async (id, e) => {
     e.stopPropagation();
@@ -102,10 +122,10 @@ export default function VideoLibrary({ sessions, onRefreshSessions, onSelectSess
         <div>
           <h2 className="text-base font-bold font-serif text-[var(--text-primary)] flex items-center gap-2">
             <HardDrive className="w-4 h-4 text-[var(--accent-coral)]" />
-            Encrypted Storage Manager
+            Video Library
           </h2>
           <p className="text-xs text-[var(--text-muted)] mt-0.5">
-            {sessions.length} session(s) stored • Automated setup scripts included in Master Archive
+            {sessions.length} video(s) stored
           </p>
         </div>
 
@@ -115,10 +135,10 @@ export default function VideoLibrary({ sessions, onRefreshSessions, onSelectSess
               onClick={handleMasterExport}
               disabled={isExportingMaster}
               className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-[var(--accent-coral)] text-[#1D1214] text-xs font-bold shadow-md transition shrink-0"
-              title="Download Master Archive with setup.bat & restore.py automated scripts"
+              title="Download Master Zip Archive"
             >
               <Download className="w-3.5 h-3.5" />
-              <span>{isExportingMaster ? 'Building Archive...' : 'Master Download Archive'}</span>
+              <span>{isExportingMaster ? 'Exporting...' : 'Export All (Zip)'}</span>
             </button>
           )}
 
@@ -187,27 +207,66 @@ export default function VideoLibrary({ sessions, onRefreshSessions, onSelectSess
           {sessions.map((session) => (
             <div
               key={session.id}
-              onClick={() => onSelectSession(session.id)}
-              className="katalyst-card katalyst-card-hover p-5 rounded-2xl border border-[var(--border-color)] cursor-pointer space-y-4 group"
+              onClick={() => handleSelectSession(session.id)}
+              className="katalyst-card katalyst-card-hover rounded-2xl border border-[var(--border-color)] cursor-pointer overflow-hidden group flex flex-col justify-between"
             >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-start space-x-3 min-w-0">
-                  <div className="p-3 bg-[var(--accent-coral)]/15 rounded-xl text-[var(--accent-coral)] border border-[var(--accent-coral)]/30 shrink-0 group-hover:bg-[var(--accent-coral)] group-hover:text-[#1D1214] transition">
-                    <Play className="w-5 h-5 fill-current" />
-                  </div>
-                  <div className="min-w-0">
-                    <h3 className="text-sm font-bold font-serif text-[var(--text-primary)] truncate">
-                      {session.title}
-                    </h3>
-                    <div className="flex items-center space-x-2 text-[11px] text-[var(--text-muted)] mt-1 font-mono">
-                      <Calendar className="w-3 h-3 text-[var(--text-muted)]" />
-                      <span>{new Date(session.createdAt).toLocaleDateString()}</span>
+              {session.thumbnailUrl && (
+                <div className="relative aspect-video w-full bg-[var(--bg-ground)] overflow-hidden border-b border-[var(--border-color)]">
+                  <img
+                    src={session.thumbnailUrl}
+                    alt={session.title}
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                  />
+                  <div className="absolute inset-0 bg-black/30 opacity-40 group-hover:opacity-20 transition-opacity" />
+                  <button
+                    type="button"
+                    onClick={(e) => handlePlayPreview(session, e)}
+                    className="absolute inset-0 flex items-center justify-center cursor-pointer"
+                  >
+                    <div className="w-10 h-10 rounded-full bg-[var(--accent-coral)] text-white dark:text-[#261619] shadow-lg flex items-center justify-center group-hover:scale-110 transition-transform">
+                      <Play className="w-5 h-5 fill-current ml-0.5" />
+                    </div>
+                  </button>
+                </div>
+              )}
+
+              <div className="p-4 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start space-x-3 min-w-0">
+                    {!session.thumbnailUrl && (
+                      <button
+                        type="button"
+                        onClick={(e) => handlePlayPreview(session, e)}
+                        className="p-3 bg-[var(--accent-coral)]/15 rounded-xl text-[var(--accent-coral)] border border-[var(--accent-coral)]/30 shrink-0 hover:bg-[var(--accent-coral)] hover:text-[#1D1214] transition shadow-sm"
+                        title="Play Video Preview in Studio"
+                      >
+                        <Play className="w-5 h-5 fill-current" />
+                      </button>
+                    )}
+                    <div className="min-w-0">
+                      <h3 className="text-sm font-bold font-serif text-[var(--text-primary)] truncate">
+                        {session.title}
+                      </h3>
+                      <div className="flex items-center space-x-2 text-[11px] text-[var(--text-muted)] mt-1 font-mono">
+                        <Calendar className="w-3 h-3 text-[var(--text-muted)]" />
+                        <span>{new Date(session.createdAt).toLocaleDateString()}</span>
+                      </div>
                     </div>
                   </div>
-                </div>
 
                 <div className="flex items-center space-x-1 shrink-0">
                   <button
+                    type="button"
+                    onClick={(e) => handlePlayPreview(session, e)}
+                    className="p-2 text-[var(--accent-coral)] hover:bg-[var(--accent-coral)]/10 rounded-lg transition text-xs font-semibold flex items-center gap-1"
+                    title="Quick Preview Video"
+                  >
+                    <Eye className="w-4 h-4" />
+                    <span className="hidden sm:inline">Preview</span>
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={(e) => handleExportZip(session, e)}
                     className="p-2 text-[var(--accent-peach)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-ground)] rounded-lg transition"
                     title="Download Static HLS Zip Package for GitHub Pages"
@@ -216,6 +275,7 @@ export default function VideoLibrary({ sessions, onRefreshSessions, onSelectSess
                   </button>
 
                   <button
+                    type="button"
                     onClick={(e) => handleDelete(session.id, e)}
                     className="p-2 text-[var(--text-muted)] hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition"
                     title="Delete Session"
@@ -225,44 +285,87 @@ export default function VideoLibrary({ sessions, onRefreshSessions, onSelectSess
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
-                <div className="p-2 rounded bg-[var(--bg-ground)] border border-[var(--border-color)]">
-                  <span className="text-[var(--text-muted)] block text-[10px]">AES Key</span>
-                  <span className="text-emerald-400 font-bold truncate block" title={session.keyHex}>
-                    {session.keyHex?.substring(0, 12)}...
-                  </span>
-                </div>
-                <div className="p-2 rounded bg-[var(--bg-ground)] border border-[var(--border-color)]">
-                  <span className="text-[var(--text-muted)] block text-[10px]">Segments</span>
-                  <span className="text-[var(--text-primary)] font-bold">{session.segmentCount} chunks</span>
-                </div>
-                <div className="p-2 rounded bg-[var(--bg-ground)] border border-[var(--border-color)]">
-                  <span className="text-[var(--text-muted)] block text-[10px]">Size</span>
-                  <span className="text-[var(--text-primary)] font-bold">
-                    {(session.totalSizeBytes / 1024 / 1024).toFixed(2)} MB
-                  </span>
-                </div>
-                <div className="p-2 rounded bg-[var(--bg-ground)] border border-[var(--border-color)]">
-                  <span className="text-[var(--text-muted)] block text-[10px]">Protection</span>
-                  <span className="text-[var(--accent-peach)] font-bold flex items-center gap-1">
-                    <ShieldCheck className="w-3 h-3 text-[var(--accent-coral)]" />
-                    AES-128 HLS
-                  </span>
-                </div>
+              <div className="pt-2 flex items-center justify-between border-t border-[var(--border-color)]">
+                <span className="text-[11px] text-[var(--accent-coral)] group-hover:translate-x-1 transition-transform font-bold flex items-center gap-1">
+                  <span>Load Lecture in Student Portal</span>
+                  <span>→</span>
+                </span>
+                <span className="text-[11px] text-[var(--text-muted)] font-mono">
+                  {(session.totalSizeBytes / 1024 / 1024).toFixed(1)} MB
+                </span>
               </div>
 
-              <div className="pt-2 flex items-center justify-between border-t border-[var(--border-color)]">
-                <span className="text-[11px] text-[var(--accent-coral)] group-hover:translate-x-1 transition-transform font-medium">
-                  Load Lecture →
-                </span>
-                <span className="text-[10px] text-[var(--accent-peach)] font-mono flex items-center gap-1">
-                  <Download className="w-3 h-3" />
-                  Download Zip
-                </span>
               </div>
 
             </div>
           ))}
+        </div>
+      )}
+
+      {/* In-Studio Video Preview Player Modal */}
+      {activePreviewSession && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md overflow-y-auto">
+          <div className="relative w-full max-w-4xl bg-[var(--bg-ground)] border border-[var(--border-color)] rounded-3xl shadow-2xl overflow-hidden my-8 space-y-4 p-6">
+            
+            <div className="flex items-center justify-between border-b border-[var(--border-color)] pb-3">
+              <div className="flex items-center space-x-2">
+                <div className="p-2 rounded-xl bg-[var(--accent-coral)]/15 text-[var(--accent-coral)] border border-[var(--accent-coral)]/30">
+                  <Play className="w-5 h-5 fill-current" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold font-heading text-[var(--text-primary)]">
+                    In-Studio Video Preview
+                  </h3>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    {activePreviewSession.title}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setActivePreviewSession(null)}
+                className="p-2 rounded-xl text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)] transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Video Player */}
+            <div className="rounded-2xl overflow-hidden border border-[var(--border-color)] shadow-lg bg-black">
+              <VideoPlayer session={activePreviewSession} />
+            </div>
+
+            {/* Action Bar */}
+            <div className="flex items-center justify-between pt-2">
+              <span className="text-xs font-mono text-[var(--text-muted)]">
+                {(activePreviewSession.totalSizeBytes / 1024 / 1024).toFixed(1)} MB • {activePreviewSession.segmentCount || 1} segment(s)
+              </span>
+
+              <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setActivePreviewSession(null)}
+                  className="px-4 py-2 rounded-xl bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border-color)] text-[var(--text-primary)] text-xs font-semibold transition"
+                >
+                  Close Preview
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const sid = activePreviewSession.id;
+                    setActivePreviewSession(null);
+                    handleSelectSession(sid);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-[var(--accent-coral)] text-white dark:text-[#261619] text-xs font-extrabold shadow-md hover:opacity-90 transition"
+                >
+                  Open in Student Portal →
+                </button>
+              </div>
+            </div>
+
+          </div>
         </div>
       )}
 

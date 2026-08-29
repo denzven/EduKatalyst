@@ -306,10 +306,10 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
           </div>
           <div>
             <h3 className="text-sm font-bold text-[var(--text-primary)] font-serif">
-              Cloud Backup & Temporary Storage Hub
+              Cloud Sync & Backups
             </h3>
             <p className="text-[var(--text-muted)] text-[11px] mt-0.5">
-              Connect your GitHub or Google Drive account to sync encrypted lectures, manifests, and notes directly from the browser.
+              Connect GitHub or Google Drive to backup your video library across devices
             </p>
           </div>
         </div>
@@ -325,7 +325,7 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
             }`}
           >
             <GithubIcon className="w-4 h-4" />
-            <span>GitHub Gist / Repos</span>
+            <span>GitHub</span>
           </button>
 
           <button

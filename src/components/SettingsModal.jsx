@@ -118,11 +118,8 @@ export default function SettingsModal({
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <h4 className="text-xs font-bold font-heading text-[var(--text-primary)] uppercase tracking-wider">
-                    Curated Theme Presets Gallery ({THEME_PRESETS.length})
+                    Theme Presets ({THEME_PRESETS.length})
                   </h4>
-                  <span className="text-[11px] font-mono text-[var(--text-muted)]">
-                    Auto-saved to LocalStorage
-                  </span>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[55vh] overflow-y-auto pr-1">
@@ -141,7 +138,7 @@ export default function SettingsModal({
                           borderColor: isSelected ? style.accent : style.border,
                           color: style.text
                         }}
-                        className={`p-4 rounded-2xl cursor-pointer border-2 flex flex-col justify-between space-y-3.5 transition-all relative shadow-lg`}
+                        className={`p-4 rounded-2xl cursor-pointer border-2 flex flex-col justify-between space-y-3 transition-all relative shadow-md`}
                       >
                         {/* Preset Card Header */}
                         <div className="flex items-center justify-between">
@@ -152,21 +149,14 @@ export default function SettingsModal({
                             {preset.category}
                           </span>
 
-                          <div className="flex items-center space-x-2">
-                            <span style={{ color: style.muted }} className="text-[10px] font-mono flex items-center gap-1">
-                              <Info className="w-3 h-3" />
-                              <span>Details</span>
-                            </span>
-
-                            {isSelected && (
-                              <div 
-                                style={{ backgroundColor: style.accent, color: style.accentText }}
-                                className="w-5 h-5 rounded-full flex items-center justify-center font-bold text-xs shadow"
-                              >
-                                <Check className="w-3.5 h-3.5" />
-                              </div>
-                            )}
-                          </div>
+                          {isSelected && (
+                            <div 
+                              style={{ backgroundColor: style.accent, color: style.accentText }}
+                              className="w-5 h-5 rounded-full flex items-center justify-center font-bold text-xs shadow"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                            </div>
+                          )}
                         </div>
 
                         {/* Title & Description */}
@@ -179,47 +169,6 @@ export default function SettingsModal({
                           <p style={{ color: style.muted }} className="text-[11px] leading-relaxed">
                             {preset.description}
                           </p>
-
-                          <div className="pt-0.5">
-                            <span 
-                              style={{ backgroundColor: style.surface, color: style.muted, borderColor: style.border }}
-                              className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-md border text-[10px] font-mono"
-                            >
-                              <span>🎛️</span>
-                              <span>{preset.motion}</span>
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Live Interactive Accent Sample Box inside Theme Card */}
-                        <div 
-                          style={{ backgroundColor: style.surface, borderColor: style.border }}
-                          className="p-2.5 rounded-xl border flex items-center justify-between"
-                        >
-                          <span style={{ color: style.accent }} className="text-xs font-bold font-mono">
-                            Accent Sample
-                          </span>
-                          <button 
-                            style={{ backgroundColor: style.accent, color: style.accentText }}
-                            className="px-3 py-1 rounded-full text-xs font-bold shadow-sm"
-                          >
-                            Action
-                          </button>
-                        </div>
-
-                        {/* 7-Swatch Color Bar */}
-                        <div 
-                          style={{ backgroundColor: style.surface, borderColor: style.border }}
-                          className="p-1.5 rounded-xl border flex items-center justify-between gap-1"
-                        >
-                          {preset.swatches.map((colorHex, idx) => (
-                            <div
-                              key={idx}
-                              className="flex-1 h-4 rounded-md border border-black/10 shadow-inner"
-                              style={{ backgroundColor: colorHex }}
-                              title={colorHex}
-                            />
-                          ))}
                         </div>
 
                       </motion.div>
@@ -235,21 +184,12 @@ export default function SettingsModal({
                 <div className="p-4 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)] space-y-3">
                   <h4 className="text-xs font-bold font-heading text-[var(--text-primary)] flex items-center gap-2">
                     <Zap className="w-4 h-4 text-[var(--accent-coral)]" />
-                    Encrypted Player Engine Configuration
+                    Storage & Cache
                   </h4>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                    <div className="p-3 rounded-xl bg-[var(--bg-ground)] border border-[var(--border-color)] space-y-1">
-                      <span className="font-bold text-[var(--text-primary)] block">Web Crypto Decryption</span>
-                      <span className="text-[11px] text-[var(--text-muted)] block">AES-128 HLS chunk deciphering via native browser Web Crypto API</span>
-                      <span className="text-[10px] font-mono text-emerald-400 font-bold block pt-1">✓ Active (Hardware Accelerated)</span>
-                    </div>
-
-                    <div className="p-3 rounded-xl bg-[var(--bg-ground)] border border-[var(--border-color)] space-y-1">
-                      <span className="font-bold text-[var(--text-primary)] block">Storage Quota</span>
-                      <span className="text-[11px] text-[var(--text-muted)] block">Local IndexedDB video lecture cache usage</span>
-                      <span className="text-[10px] font-mono text-[var(--accent-peach)] font-bold block pt-1">{videoCount} sessions cached</span>
-                    </div>
+                  <div className="p-3 rounded-xl bg-[var(--bg-ground)] border border-[var(--border-color)] space-y-1 text-xs">
+                    <span className="font-bold text-[var(--text-primary)] block">Local Storage Quota</span>
+                    <span className="text-[11px] text-[var(--text-muted)] block">Cached lectures: {videoCount} session(s)</span>
                   </div>
                 </div>
 
@@ -257,7 +197,7 @@ export default function SettingsModal({
                   <div className="p-4 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)] flex items-center justify-between">
                     <div>
                       <h4 className="text-xs font-bold font-heading text-[var(--text-primary)]">Progressive Web App (PWA)</h4>
-                      <p className="text-[11px] text-[var(--text-muted)] mt-0.5">Install EduKatalyst for desktop & mobile offline access</p>
+                      <p className="text-[11px] text-[var(--text-muted)] mt-0.5">Install EduKatalyst for offline access</p>
                     </div>
 
                     <button
@@ -278,16 +218,11 @@ export default function SettingsModal({
                 <div className="p-4 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)] space-y-3">
                   <h4 className="text-xs font-bold font-heading text-[var(--text-primary)] flex items-center gap-2">
                     <ShieldCheck className="w-4 h-4 text-[var(--accent-coral)]" />
-                    Anti-Cheat Protection Shield
+                    Quiz Integrity Protection
                   </h4>
                   <p className="text-xs text-[var(--text-muted)] leading-relaxed">
-                    EduKatalyst enforces automatic DevTools detection during active quiz sessions to preserve test integrity for peer assessments.
+                    EduKatalyst protects active quiz sessions by detecting browser DevTools inspection during peer assessments.
                   </p>
-
-                  <div className="p-3 rounded-xl bg-[var(--bg-ground)] border border-[var(--border-color)] text-xs space-y-1">
-                    <span className="font-bold text-[var(--text-primary)] block">Inspection Shield Status</span>
-                    <span className="text-emerald-400 font-mono font-bold block">✓ Armed & Active</span>
-                  </div>
                 </div>
               </div>
             )}

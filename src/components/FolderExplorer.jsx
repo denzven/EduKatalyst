@@ -28,23 +28,18 @@ export default function FolderExplorer({
       className="bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-3xl p-5 sm:p-6 space-y-6 shadow-xl transition-colors duration-300"
     >
       
-      {/* Breadcrumb Header Bar - Theme Contrast Compliant */}
+      {/* Breadcrumb Header Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--border-color)] pb-4">
         
         <div className="flex items-center space-x-2 text-xs font-mono text-[var(--text-muted)] overflow-x-auto scrollbar-none">
-          <HardDrive className="w-4 h-4 text-[var(--accent-coral)] shrink-0" />
-          <span className="text-[var(--text-muted)]">Storage</span>
-          <ChevronRight className="w-3.5 h-3.5 shrink-0 text-[var(--border-color)]" />
-          <span className="text-[var(--text-muted)]">Root</span>
-          <ChevronRight className="w-3.5 h-3.5 shrink-0 text-[var(--border-color)]" />
-          <span className="text-[var(--text-primary)] font-bold px-2 py-0.5 rounded bg-[var(--bg-ground)] border border-[var(--border-color)] flex items-center gap-1">
+          <span className="text-[var(--text-primary)] font-bold px-2.5 py-1 rounded-xl bg-[var(--bg-ground)] border border-[var(--border-color)] flex items-center gap-1.5">
             <Folder className="w-3.5 h-3.5 text-[var(--accent-coral)] shrink-0" />
-            <span>{selectedSubject === 'All' ? 'All Folders' : selectedSubject}</span>
+            <span>{selectedSubject === 'All' ? 'All Subjects' : selectedSubject}</span>
           </span>
           {selectedTag !== 'All' && (
             <>
               <ChevronRight className="w-3.5 h-3.5 shrink-0 text-[var(--border-color)]" />
-              <span className="text-[var(--accent-sage)] font-bold px-2 py-0.5 rounded bg-[var(--bg-ground)] border border-[var(--border-color)]">
+              <span className="text-[var(--accent-sage)] font-bold px-2.5 py-1 rounded-xl bg-[var(--bg-ground)] border border-[var(--border-color)]">
                 #{selectedTag}
               </span>
             </>
@@ -73,9 +68,6 @@ export default function FolderExplorer({
           <span className="text-xs font-bold font-heading text-[var(--text-primary)] flex items-center gap-1.5">
             <Layers className="w-3.5 h-3.5 text-[var(--accent-coral)]" />
             Course Directories ({subjects.length})
-          </span>
-          <span className="text-[11px] text-[var(--text-muted)]">
-            Click a box to open directory
           </span>
         </div>
 

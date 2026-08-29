@@ -200,17 +200,22 @@ export default function VideoPlayer({ session }) {
     if (videoRef.current) {
       videoRef.current.volume = newVol;
       setIsMuted(newVol === 0);
+      triggerFeedback(`Volume ${Math.round(newVol * 100)}%`);
     }
   };
 
   const toggleMute = () => {
     if (videoRef.current) {
       if (isMuted) {
-        videoRef.current.volume = volume || 1;
+        const restoredVol = volume > 0 ? volume : 0.8;
+        videoRef.current.volume = restoredVol;
+        setVolume(restoredVol);
         setIsMuted(false);
+        triggerFeedback(`Volume ${Math.round(restoredVol * 100)}%`);
       } else {
         videoRef.current.volume = 0;
         setIsMuted(true);
+        triggerFeedback('Muted');
       }
     }
   };
@@ -263,7 +268,7 @@ export default function VideoPlayer({ session }) {
       {/* Title & Category Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-1">
         <div className="flex items-center space-x-2.5">
-          <span className="px-2.5 py-0.5 rounded text-xs font-mono font-semibold bg-[var(--accent-coral)]/20 text-[var(--accent-peach)] border border-[var(--accent-coral)]/30 flex items-center gap-1">
+          <span className="px-2.5 py-0.5 rounded-lg text-xs font-semibold bg-[var(--bg-surface)] text-[var(--accent-coral)] border border-[var(--border-color)] flex items-center gap-1">
             <Folder className="w-3.5 h-3.5 text-[var(--accent-coral)]" />
             <span>{session.category || 'General'}</span>
           </span>
@@ -271,11 +276,6 @@ export default function VideoPlayer({ session }) {
             {session.title}
           </h2>
         </div>
-
-        <span className="px-2.5 py-1 rounded text-xs font-mono font-semibold bg-[var(--bg-surface)] text-[var(--accent-peach)] border border-[var(--border-color)] flex items-center gap-1.5 shrink-0 w-fit">
-          <ShieldCheck className="w-3.5 h-3.5 text-[var(--accent-coral)]" />
-          AES-128 HLS Stream
-        </span>
       </div>
 
       {/* Main Video Container */}
@@ -287,10 +287,12 @@ export default function VideoPlayer({ session }) {
       >
         <video
           ref={videoRef}
+          poster={session.thumbnailUrl || session.posterUrl}
           onTimeUpdate={handleTimeUpdate}
           onPlay={() => setIsPlaying(true)}
           onPause={() => setIsPlaying(false)}
           onClick={togglePlay}
+          playsInline
           className="w-full h-full object-contain cursor-pointer"
         />
 
@@ -366,8 +368,8 @@ export default function VideoPlayer({ session }) {
               </button>
 
               {/* Volume Controller */}
-              <div className="hidden sm:flex items-center space-x-2">
-                <button onClick={toggleMute} className="text-[var(--text-primary)] hover:text-[var(--accent-coral)] transition p-1">
+              <div className="flex items-center space-x-1.5">
+                <button onClick={toggleMute} className="text-[var(--text-primary)] hover:text-[var(--accent-coral)] transition p-1" title={isMuted ? "Unmute Audio (M)" : "Mute Audio (M)"}>
                   {isMuted || volume === 0 ? <VolumeX className="w-5 h-5 text-rose-400" /> : <Volume2 className="w-5 h-5" />}
                 </button>
                 <input
@@ -377,7 +379,7 @@ export default function VideoPlayer({ session }) {
                   step="0.05"
                   value={isMuted ? 0 : volume}
                   onChange={handleVolumeChange}
-                  className="w-16 h-1 bg-[var(--border-color)] rounded appearance-none cursor-pointer accent-[var(--accent-coral)]"
+                  className="hidden sm:block w-16 h-1 bg-[var(--border-color)] rounded appearance-none cursor-pointer accent-[var(--accent-coral)]"
                 />
               </div>
 
@@ -473,63 +475,6 @@ export default function VideoPlayer({ session }) {
           )}
         </div>
       )}
-
-      {/* Developer Verification Accordion */}
-      <div className="pt-2">
-        <button
-          onClick={() => setShowDevSandbox(!showDevSandbox)}
-          className="flex items-center space-x-2 text-xs text-[var(--text-muted)] hover:text-[var(--accent-coral)] font-medium transition"
-        >
-          {showDevSandbox ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-          <span>Developer Verification Sandbox</span>
-        </button>
-
-        {showDevSandbox && (
-          <div className="mt-3 p-5 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)] space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="p-4 rounded-xl bg-[var(--bg-ground)] border border-rose-500/20 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-rose-400 flex items-center gap-1">
-                    <Lock className="w-3.5 h-3.5" />
-                    Direct Raw .ts Segment
-                  </span>
-                  <span className="text-[10px] font-mono text-rose-300 bg-rose-500/10 px-2 py-0.5 rounded">
-                    Encrypted Blob
-                  </span>
-                </div>
-                <video ref={rawVideoRef} src={rawSegmentUrl} className="hidden" />
-                <button
-                  onClick={handleRawVideoPlay}
-                  className="w-full py-2 rounded-lg bg-rose-950/40 hover:bg-rose-900/40 border border-rose-500/30 text-rose-300 text-xs font-semibold transition"
-                >
-                  Test Raw Playback
-                </button>
-                {rawErrorMsg && (
-                  <p className="text-[11px] text-rose-400 font-mono">{rawErrorMsg}</p>
-                )}
-              </div>
-
-              <div className="p-4 rounded-xl bg-[var(--bg-ground)] border border-emerald-500/20 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-emerald-400 flex items-center gap-1">
-                    <Unlock className="w-3.5 h-3.5" />
-                    HLS.js + Key Decryptor
-                  </span>
-                  <span className="text-[10px] font-mono text-emerald-300 bg-emerald-500/10 px-2 py-0.5 rounded">
-                    Decrypted
-                  </span>
-                </div>
-                <p className="text-xs text-[var(--text-primary)] font-mono truncate">
-                  Key Hex: {session.keyHex}
-                </p>
-                <div className="text-[11px] text-emerald-400 font-semibold">
-                  ✓ Playing smoothly via MSE
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
 
     </div>
   );

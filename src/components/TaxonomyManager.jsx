@@ -50,10 +50,10 @@ export default function TaxonomyManager({ sessions = [], notes = [], quizzes = [
       <div className="p-4 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)]">
         <h2 className="text-base font-bold font-heading text-[var(--text-primary)] flex items-center gap-2">
           <Layers className="w-4 h-4 text-[var(--accent-coral)]" />
-          Central Taxonomy & Folder Controller
+          Categories & Tags
         </h2>
         <p className="text-xs text-[var(--text-muted)] mt-0.5">
-          Dynamic central manager for subject directories and tag classifications. Zero hardcoded strings.
+          Organize learning content by subject categories and tags
         </p>
       </div>
 

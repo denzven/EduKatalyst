@@ -28,6 +28,7 @@ export default function App() {
     : routeState.tab;
 
   const isLandingPage = routeState.tab === 'landing';
+  const isStudioPage = routeState.tab === 'studio';
 
   const refreshSessions = async () => {
     try {
@@ -48,14 +49,7 @@ export default function App() {
     const unsubscribe = subscribeToHash((newRoute) => {
       setRouteState(newRoute);
       window.scrollTo(0, 0);
-      if (newRoute.tab === 'studio') {
-        setIsDevModalOpen(true);
-      }
     });
-
-    if (routeState.tab === 'studio') {
-      setIsDevModalOpen(true);
-    }
 
     return unsubscribe;
   }, []);
@@ -66,13 +60,11 @@ export default function App() {
   };
 
   const handleOpenStudio = () => {
-    setIsDevModalOpen(true);
     navigateTo('studio');
   };
 
   const handleCloseStudio = () => {
-    setIsDevModalOpen(false);
-    navigateTo(isLandingPage ? 'landing' : activePortalTab);
+    navigateTo('explorer');
   };
 
   return (
@@ -89,12 +81,24 @@ export default function App() {
         onOpenSettings={() => setIsSettingsOpen(true)}
       />
 
-      {/* Main View: Landing Page OR Content Portal */}
+      {/* Main Page Content */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {isLandingPage ? (
           <LandingPage
             onProceed={() => handleTabChange('explorer')}
             onOpenStudio={handleOpenStudio}
+          />
+        ) : isStudioPage ? (
+          <DevStudioModal
+            isOpen={true}
+            onClose={handleCloseStudio}
+            isCreatorAuth={isCreatorAuth}
+            setIsCreatorAuth={setIsCreatorAuth}
+            sessions={sessions}
+            onRefreshSessions={refreshSessions}
+            onSelectSessionForPlayer={(id) => {
+              handleTabChange('lessons');
+            }}
           />
         ) : (
           <StudentPortal
@@ -107,27 +111,14 @@ export default function App() {
         )}
       </main>
 
-      {/* Mobile Bottom Navigation Bar (Hidden on landing page) */}
-      {!isLandingPage && (
+      {/* Mobile Bottom Navigation Bar */}
+      {!isLandingPage && !isStudioPage && (
         <MobileBottomNav
           activePortalTab={activePortalTab}
           setActivePortalTab={handleTabChange}
           onOpenDevStudio={handleOpenStudio}
         />
       )}
-
-      {/* Creator Studio Password Protected Modal */}
-      <DevStudioModal
-        isOpen={isDevModalOpen}
-        onClose={handleCloseStudio}
-        isCreatorAuth={isCreatorAuth}
-        setIsCreatorAuth={setIsCreatorAuth}
-        sessions={sessions}
-        onRefreshSessions={refreshSessions}
-        onSelectSessionForPlayer={(id) => {
-          handleTabChange('lessons');
-        }}
-      />
 
       {/* Platform Settings Modal */}
       <SettingsModal
@@ -141,13 +132,11 @@ export default function App() {
       />
 
       {/* Footer */}
-      <footer className="hidden md:block border-t border-[var(--border-color)] bg-[var(--bg-ground)] py-5 text-center text-xs text-[var(--text-muted)] font-mono transition-colors duration-300">
-        <div className="flex items-center justify-center space-x-4">
-          <span className="font-serif text-[var(--text-primary)] font-bold">EduKatalyst by DZVN</span>
+      <footer className="hidden md:block border-t border-[var(--border-color)] bg-[var(--bg-ground)] py-4 text-center text-xs text-[var(--text-muted)] transition-colors duration-300">
+        <div className="flex items-center justify-center space-x-2">
+          <span className="font-serif text-[var(--text-primary)] font-bold">EduKatalyst</span>
           <span>•</span>
-          <span>Katalyze the Change</span>
-          <span>•</span>
-          <span>By students. For students.</span>
+          <span>Learning Platform</span>
         </div>
       </footer>
 

@@ -271,10 +271,10 @@ export default function QuizStudioManager({ onRefreshSessions }) {
         <div>
           <h2 className="text-base font-bold font-serif text-[var(--text-primary)] flex items-center gap-2">
             <HelpCircle className="w-4 h-4 text-[var(--accent-coral)]" />
-            Interactive Quiz Authoring Studio
+            Quiz Creator
           </h2>
           <p className="text-xs text-[var(--text-muted)] mt-0.5">
-            Create assessment quizzes with multiple choice options, correct answer keys, and LaTeX math formulas
+            Create interactive multiple-choice quizzes with answers and explanations
           </p>
         </div>
 
@@ -315,7 +315,7 @@ export default function QuizStudioManager({ onRefreshSessions }) {
       <div className="p-5 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)] space-y-4">
         <h3 className="font-bold text-[var(--text-primary)] flex items-center gap-2 border-b border-[var(--border-color)] pb-2">
           <Layers className="w-4 h-4 text-[var(--accent-coral)]" />
-          Quiz Package Details
+          Quiz Details
         </h3>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -325,10 +325,10 @@ export default function QuizStudioManager({ onRefreshSessions }) {
             </label>
             <input
               type="text"
-              placeholder="e.g. Calculus Derivatives Quiz"
+              placeholder="e.g. Calculus III Midterm Practice Quiz"
               value={quizTitle}
               onChange={(e) => setQuizTitle(e.target.value)}
-              className="w-full bg-[var(--bg-ground)] border border-[var(--border-color)] rounded-xl px-3.5 py-2 text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-coral)]"
+              className="w-full bg-[var(--bg-ground)] border border-[var(--border-color)] rounded-xl px-3.5 py-2 text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-coral)]"
             />
           </div>
 
@@ -341,7 +341,7 @@ export default function QuizStudioManager({ onRefreshSessions }) {
               placeholder="e.g. Mathematics"
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
-              className="w-full bg-[var(--bg-ground)] border border-[var(--border-color)] rounded-xl px-3.5 py-2 text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-coral)]"
+              className="w-full bg-[var(--bg-ground)] border border-[var(--border-color)] rounded-xl px-3.5 py-2 text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-coral)]"
             />
           </div>
 
@@ -351,10 +351,10 @@ export default function QuizStudioManager({ onRefreshSessions }) {
             </label>
             <input
               type="text"
-              placeholder="calculus, ODE, quiz"
+              placeholder="e.g. calculus, derivatives, exam-prep"
               value={tagsInput}
               onChange={(e) => setTagsInput(e.target.value)}
-              className="w-full bg-[var(--bg-ground)] border border-[var(--border-color)] rounded-xl px-3.5 py-2 text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--accent-coral)]"
+              className="w-full bg-[var(--bg-ground)] border border-[var(--border-color)] rounded-xl px-3.5 py-2 text-[var(--text-primary)] placeholder-[var(--text-muted)] font-mono focus:outline-none focus:border-[var(--accent-coral)]"
             />
           </div>
         </div>
@@ -545,7 +545,7 @@ export default function QuizStudioManager({ onRefreshSessions }) {
               className="w-full sm:w-auto py-2.5 px-5 rounded-xl bg-[var(--accent-coral)] text-[#1D1214] font-bold flex items-center justify-center space-x-2 transition shadow-md"
             >
               <Lock className="w-4 h-4" />
-              <span>Publish Quiz Live to Platform</span>
+              <span>Publish Quiz</span>
             </button>
 
             <div className="flex items-center space-x-2 w-full sm:w-auto">

@@ -4,6 +4,30 @@ import { fetchFile, toBlobURL } from '@ffmpeg/util';
 let ffmpegInstance = null;
 let isLoaded = false;
 
+export const SUPPORTED_VIDEO_EXTENSIONS = ['.mp4', '.mov', '.webm', '.avi', '.mkv', '.m4v', '.flv'];
+
+/**
+ * Validate video file type & format
+ */
+export function validateVideoFile(file) {
+  if (!file) {
+    return { valid: false, error: 'No file selected.' };
+  }
+
+  const nameLower = file.name.toLowerCase();
+  const isSupportedExt = SUPPORTED_VIDEO_EXTENSIONS.some(ext => nameLower.endsWith(ext));
+  const isVideoType = file.type ? file.type.startsWith('video/') : isSupportedExt;
+
+  if (!isSupportedExt && !isVideoType) {
+    return { 
+      valid: false, 
+      error: `Unsupported file format. Please upload a video file (${SUPPORTED_VIDEO_EXTENSIONS.join(', ')}).` 
+    };
+  }
+
+  return { valid: true };
+}
+
 /**
  * Get or initialize the FFmpeg WASM singleton instance
  */
@@ -12,7 +36,6 @@ export async function getFFmpegInstance(onLog, onProgress) {
     ffmpegInstance = new FFmpeg();
   }
 
-  // Attach dynamic event handlers
   if (onLog) {
     ffmpegInstance.on('log', ({ message }) => {
       onLog(message);
@@ -21,15 +44,13 @@ export async function getFFmpegInstance(onLog, onProgress) {
 
   if (onProgress) {
     ffmpegInstance.on('progress', ({ progress }) => {
-      // progress is a float between 0 and 1
       onProgress(Math.round(progress * 100));
     });
   }
 
   if (!isLoaded) {
-    onLog?.('Loading FFmpeg WebAssembly core modules from CDN...');
+    onLog?.('Initializing video processing engine...');
     
-    // Load ffmpeg core ESM bundle from unpkg/jsdelivr CDN
     const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
     
     try {
@@ -38,10 +59,10 @@ export async function getFFmpegInstance(onLog, onProgress) {
         wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
       });
       isLoaded = true;
-      onLog?.('FFmpeg WASM initialized successfully.');
+      onLog?.('Engine initialized successfully.');
     } catch (err) {
-      onLog?.(`Error loading FFmpeg WASM: ${err.message}`);
-      throw err;
+      onLog?.(`Engine error: ${err.message}`);
+      throw new Error(`Failed to initialize video processing engine: ${err.message}`);
     }
   }
 
@@ -61,7 +82,7 @@ export function generateAES128Key() {
 }
 
 /**
- * Perform In-Browser AES-128 HLS Chunking & Encryption
+ * Perform In-Browser Multi-Format Video Processing & Encryption
  */
 export async function encryptAndChunkVideo({
   file,
@@ -69,34 +90,37 @@ export async function encryptAndChunkVideo({
   onLog = () => {},
   onProgress = () => {}
 }) {
+  const validation = validateVideoFile(file);
+  if (!validation.valid) {
+    throw new Error(validation.error);
+  }
+
   const ffmpeg = await getFFmpegInstance(onLog, onProgress);
 
-  onLog('Step 1/5: Generating 16-byte AES-128 Encryption Key via Web Crypto API...');
+  onLog('Step 1/4: Generating security key...');
   const { keyBytes, keyHex } = generateAES128Key();
-  onLog(`AES-128 Key (Hex): ${keyHex}`);
 
-  onLog('Step 2/5: Writing input video and encryption metadata to FFmpeg virtual filesystem...');
+  onLog('Step 2/4: Preparing video stream...');
   
-  // Write input MP4 file to FFmpeg memory
-  const inputFileName = 'input.mp4';
+  // Extract file extension dynamically
+  const extMatch = file.name.match(/\.([a-z0-9]+)$/i);
+  const fileExt = extMatch ? extMatch[1].toLowerCase() : 'mp4';
+  const inputFileName = `input.${fileExt}`;
+
   const fileData = await fetchFile(file);
   await ffmpeg.writeFile(inputFileName, fileData);
 
-  // Write binary key file
   const keyFileName = 'enc.key';
   await ffmpeg.writeFile(keyFileName, keyBytes);
 
-  // Write keyinfo file (Format: Line 1: Key URI, Line 2: Path to key file)
   const keyInfoFileName = 'enc.keyinfo';
   const keyInfoContent = `${keyDeliveryUrl}\n${keyFileName}`;
   await ffmpeg.writeFile(keyInfoFileName, new TextEncoder().encode(keyInfoContent));
 
-  onLog('Step 3/5: Executing FFmpeg HLS chunking & AES-128 encryption CLI...');
+  onLog(`Step 3/4: Processing video (${fileExt.toUpperCase()} format)...`);
   
-  // Try stream copy first (ultra-fast). Fallback to ultrafast x264 if needed.
   let execCode = -1;
   try {
-    onLog('Executing: ffmpeg -i input.mp4 -c:v copy -c:a copy -hls_time 4 -hls_playlist_type vod -hls_key_info_file enc.keyinfo output.m3u8');
     execCode = await ffmpeg.exec([
       '-i', inputFileName,
       '-c:v', 'copy',
@@ -107,11 +131,10 @@ export async function encryptAndChunkVideo({
       'output.m3u8'
     ]);
   } catch (e) {
-    onLog(`Stream copy mode failed, retrying with ultrafast re-encoding: ${e.message}`);
+    onLog(`Stream copy mode unavailable, re-encoding video stream...`);
   }
 
   if (execCode !== 0) {
-    onLog('Executing fallback re-encode: ffmpeg -i input.mp4 -c:v libx264 -preset ultrafast -c:a aac -hls_time 4 -hls_key_info_file enc.keyinfo output.m3u8');
     await ffmpeg.exec([
       '-i', inputFileName,
       '-c:v', 'libx264',
@@ -124,24 +147,18 @@ export async function encryptAndChunkVideo({
     ]);
   }
 
-  onLog('Step 4/5: Extracting generated HLS playlist and encrypted .ts chunks from virtual RAM...');
+  onLog('Step 4/4: Extracting video segments...');
 
-  // Read playlist text
   const playlistData = await ffmpeg.readFile('output.m3u8');
   const playlistText = new TextDecoder('utf-8').decode(playlistData);
-  onLog('Playlist file output.m3u8 read successfully.');
 
-  // Read key file blob
   const keyFileData = await ffmpeg.readFile(keyFileName);
   const keyBlob = new Blob([keyFileData.buffer], { type: 'application/octet-stream' });
 
-  // Parse .ts chunk filenames from playlist lines
   const lines = playlistText.split('\n');
   const segmentFileNames = lines
     .map(line => line.trim())
     .filter(line => line.length > 0 && !line.startsWith('#'));
-
-  onLog(`Found ${segmentFileNames.length} encrypted .ts chunk(s): ${segmentFileNames.join(', ')}`);
 
   const segments = {};
   let totalSizeBytes = 0;
@@ -152,13 +169,12 @@ export async function encryptAndChunkVideo({
       const segBlob = new Blob([segData.buffer], { type: 'video/mp2t' });
       segments[segName] = segBlob;
       totalSizeBytes += segBlob.size;
-      onLog(`Extracted segment ${segName} (${(segBlob.size / 1024).toFixed(1)} KB)`);
     } catch (err) {
-      onLog(`Warning: Could not read segment ${segName}: ${err.message}`);
+      onLog(`Warning: Could not read segment ${segName}`);
     }
   }
 
-  onLog('Step 5/5: Cleaning up virtual filesystem memory...');
+  // Virtual filesystem cleanup
   try {
     await ffmpeg.deleteFile(inputFileName);
     await ffmpeg.deleteFile(keyFileName);
@@ -168,10 +184,10 @@ export async function encryptAndChunkVideo({
       await ffmpeg.deleteFile(segName).catch(() => {});
     }
   } catch (cleanupErr) {
-    // Ignore minor cleanup errors
+    // Ignore cleanup errors
   }
 
-  onLog('Encryption & Chunking process complete!');
+  onLog('Video processing complete!');
   onProgress(100);
 
   return {

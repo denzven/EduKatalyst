@@ -33,17 +33,9 @@ export default function Header({ onOpenDevStudio, onOpenSettings }) {
         >
           <KatalystLogo className="w-9 h-9 group-hover:scale-105 transition-transform" />
           <div>
-            <div className="flex items-center space-x-2">
-              <h1 className="text-base font-bold font-serif text-[var(--text-primary)] tracking-wide group-hover:text-[var(--accent-coral)] transition">
-                EduKatalyst
-              </h1>
-              <span className="text-[10px] font-mono text-[var(--accent-sage)] bg-[var(--bg-surface)] border border-[var(--border-color)] px-1.5 py-0.2 rounded font-semibold">
-                by DZVN
-              </span>
-            </div>
-            <p className="text-[11px] text-[var(--text-muted)] hidden sm:block">
-              Katalyze the Change • By students. For students.
-            </p>
+            <h1 className="text-base font-bold font-serif text-[var(--text-primary)] tracking-wide group-hover:text-[var(--accent-coral)] transition">
+              EduKatalyst
+            </h1>
           </div>
         </div>
 

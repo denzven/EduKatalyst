@@ -14,9 +14,10 @@ import {
   Tag,
   Folder,
   AlignLeft,
-  Plus
+  Plus,
+  Image as ImageIcon
 } from 'lucide-react';
-import { encryptAndChunkVideo } from '../utils/ffmpegHelper';
+import { encryptAndChunkVideo, validateVideoFile } from '../utils/ffmpegHelper';
 import { saveVideoSession } from '../utils/storage';
 import { exportSessionToZip, importSessionFromZip } from '../utils/zipHelper';
 import { aggregateAllSubjects, registerSubject } from '../utils/taxonomyController';
@@ -28,6 +29,7 @@ export default function VideoUploader({ onSessionCreated, onSelectSessionForPlay
   const [isAddingCustomCategory, setIsAddingCustomCategory] = useState(false);
   const [tagsInput, setTagsInput] = useState('test, placeholder, demo');
   const [description, setDescription] = useState('Sample generic video lecture placeholder.');
+  const [customThumbnailUrl, setCustomThumbnailUrl] = useState(null);
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -60,8 +62,9 @@ export default function VideoUploader({ onSessionCreated, onSelectSessionForPlay
   const handleFileSelect = (e) => {
     const file = e.target.files[0];
     if (file) {
-      if (!file.type.includes('video') && !file.name.endsWith('.mp4')) {
-        setError('Please select an MP4 video file.');
+      const validation = validateVideoFile(file);
+      if (!validation.valid) {
+        setError(validation.error);
         return;
       }
       setSelectedFile(file);
@@ -183,6 +186,55 @@ export default function VideoUploader({ onSessionCreated, onSelectSessionForPlay
     }
   };
 
+  const extractFrameThumbnail = (file) => {
+    return new Promise((resolve) => {
+      try {
+        const video = document.createElement('video');
+        video.preload = 'metadata';
+        video.muted = true;
+        video.playsInline = true;
+        const url = URL.createObjectURL(file);
+        video.src = url;
+
+        const cleanup = () => {
+          try { URL.revokeObjectURL(url); } catch (e) {}
+        };
+
+        video.onloadeddata = () => {
+          video.currentTime = Math.min(1.0, (video.duration || 4) / 4);
+        };
+
+        video.onseeked = () => {
+          try {
+            const canvas = document.createElement('canvas');
+            canvas.width = 640;
+            canvas.height = 360;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+            cleanup();
+            resolve(dataUrl);
+          } catch (e) {
+            cleanup();
+            resolve(null);
+          }
+        };
+
+        video.onerror = () => {
+          cleanup();
+          resolve(null);
+        };
+
+        setTimeout(() => {
+          cleanup();
+          resolve(null);
+        }, 3000);
+      } catch (err) {
+        resolve(null);
+      }
+    });
+  };
+
   const handleStartProcess = async () => {
     if (!selectedFile) return;
 
@@ -205,6 +257,12 @@ export default function VideoUploader({ onSessionCreated, onSelectSessionForPlay
         .map((t) => t.trim())
         .filter((t) => t.length > 0);
 
+      let finalThumbnail = customThumbnailUrl;
+      if (!finalThumbnail) {
+        appendLog('Generating video banner thumbnail frame...');
+        finalThumbnail = await extractFrameThumbnail(selectedFile);
+      }
+
       const result = await encryptAndChunkVideo({
         file: selectedFile,
         keyDeliveryUrl: 'https://mock-worker.local/get-key?vid=demo',
@@ -218,6 +276,7 @@ export default function VideoUploader({ onSessionCreated, onSelectSessionForPlay
         category: activeCategory,
         tags: parsedTags,
         description: description,
+        thumbnailUrl: finalThumbnail,
         keyHex: result.keyHex,
         keyBlob: result.keyBlob,
         keyUri: result.keyUri,
@@ -247,10 +306,10 @@ export default function VideoUploader({ onSessionCreated, onSelectSessionForPlay
         <div>
           <h2 className="text-base font-bold font-heading text-[var(--text-primary)] flex items-center gap-2">
             <Upload className="w-4 h-4 text-[var(--accent-coral)]" />
-            Lecture Encrypter
+            Upload Video
           </h2>
           <p className="text-xs text-[var(--text-muted)] mt-0.5">
-            Encrypt MP4 video lectures into AES-128 HLS & export static `.zip` packages
+            Upload and process video lectures for streaming playback
           </p>
         </div>
 
@@ -281,7 +340,7 @@ export default function VideoUploader({ onSessionCreated, onSelectSessionForPlay
             ) : (
               <Sparkles className="w-3.5 h-3.5" />
             )}
-            <span>Sample MP4</span>
+            <span>Sample Video</span>
           </button>
         </div>
       </div>
@@ -303,7 +362,7 @@ export default function VideoUploader({ onSessionCreated, onSelectSessionForPlay
             <input 
               ref={fileInputRef}
               type="file" 
-              accept="video/mp4,video/*"
+              accept="video/*,.mp4,.mov,.webm,.avi,.mkv,.m4v"
               onChange={handleFileSelect}
               className="hidden"
             />
@@ -324,10 +383,10 @@ export default function VideoUploader({ onSessionCreated, onSelectSessionForPlay
               ) : (
                 <div>
                   <p className="text-xs font-semibold text-[var(--text-primary)]">
-                    Click to select MP4 video
+                    Select or drop video file
                   </p>
                   <p className="text-[11px] text-[var(--text-muted)] mt-0.5">
-                    Standard MP4 video file
+                    MP4, MOV, WebM, MKV, AVI
                   </p>
                 </div>
               )}
@@ -339,7 +398,7 @@ export default function VideoUploader({ onSessionCreated, onSelectSessionForPlay
               <div className="flex items-center justify-between mb-1">
                 <label className="flex items-center space-x-1.5 text-xs font-semibold text-[var(--text-primary)]">
                   <Folder className="w-3.5 h-3.5 text-[var(--accent-coral)]" />
-                  <span>Subject Folder</span>
+                  <span>Category</span>
                 </label>
                 <button
                   type="button"
@@ -347,7 +406,7 @@ export default function VideoUploader({ onSessionCreated, onSelectSessionForPlay
                   className="text-[11px] text-[var(--accent-peach)] hover:underline font-mono flex items-center gap-0.5"
                 >
                   <Plus className="w-3 h-3" />
-                  <span>{isAddingCustomCategory ? 'Select Existing' : 'New Subject'}</span>
+                  <span>{isAddingCustomCategory ? 'Select Existing' : 'New Category'}</span>
                 </button>
               </div>
 
@@ -366,7 +425,7 @@ export default function VideoUploader({ onSessionCreated, onSelectSessionForPlay
               ) : (
                 <input
                   type="text"
-                  placeholder="Enter new subject name..."
+                  placeholder="Enter new category..."
                   value={customCategory}
                   onChange={(e) => setCustomCategory(e.target.value)}
                   className="w-full bg-[var(--bg-ground)] border border-[var(--border-color)] rounded-xl px-3 py-2 text-xs text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-coral)] transition"
@@ -377,11 +436,11 @@ export default function VideoUploader({ onSessionCreated, onSelectSessionForPlay
             <div>
               <label className="flex items-center space-x-1.5 text-xs font-semibold text-[var(--text-primary)] mb-1">
                 <Tag className="w-3.5 h-3.5 text-[var(--accent-peach)]" />
-                <span>Tags (Comma-Separated)</span>
+                <span>Tags (Optional)</span>
               </label>
               <input
                 type="text"
-                placeholder="test, placeholder, demo..."
+                placeholder="Comma separated tags..."
                 value={tagsInput}
                 onChange={(e) => setTagsInput(e.target.value)}
                 className="w-full bg-[var(--bg-ground)] border border-[var(--border-color)] rounded-xl px-3 py-2 text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-coral)] font-mono transition"
@@ -391,11 +450,11 @@ export default function VideoUploader({ onSessionCreated, onSelectSessionForPlay
             <div>
               <label className="flex items-center space-x-1.5 text-xs font-semibold text-[var(--text-primary)] mb-1">
                 <AlignLeft className="w-3.5 h-3.5 text-[var(--text-muted)]" />
-                <span>Video Description</span>
+                <span>Description (Optional)</span>
               </label>
               <textarea
                 rows="2"
-                placeholder="Sample generic description..."
+                placeholder="Video description..."
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 className="w-full bg-[var(--bg-ground)] border border-[var(--border-color)] rounded-xl px-3 py-2 text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-coral)] transition resize-none"
@@ -422,18 +481,18 @@ export default function VideoUploader({ onSessionCreated, onSelectSessionForPlay
             {isProcessing ? (
               <>
                 <RefreshCw className="w-4 h-4 animate-spin text-[#1D1214]" />
-                <span>Encrypting... ({progress}%)</span>
+                <span>Processing... ({progress}%)</span>
               </>
             ) : (
               <>
-                <Key className="w-4 h-4" />
-                <span>Encrypt & Package Video</span>
+                <Upload className="w-4 h-4" />
+                <span>Upload & Process Video</span>
               </>
             )}
           </button>
         </div>
 
-        {/* Right Column: Execution Monitor Terminal */}
+        {/* Right Column: Upload Progress Monitor */}
         <div className="lg:col-span-7 space-y-4">
           <div className="bg-[var(--bg-ground)] border border-[var(--border-color)] rounded-2xl p-4 flex flex-col h-[380px] shadow-lg">
             
@@ -441,7 +500,7 @@ export default function VideoUploader({ onSessionCreated, onSelectSessionForPlay
               <div className="flex items-center space-x-2">
                 <Terminal className="w-4 h-4 text-[var(--accent-coral)]" />
                 <span className="text-xs font-mono font-semibold text-[var(--text-primary)]">
-                  Execution Monitor
+                  Upload Progress
                 </span>
               </div>
             </div>

@@ -62,3 +62,50 @@ export async function decryptTextPayload(encryptedObj) {
 
   return new TextDecoder().decode(decrypted);
 }
+
+/**
+ * Encrypt full note payload object (body, sections, formula) via Web Crypto AES-GCM
+ */
+export async function encryptNoteData(note) {
+  if (!note) return note;
+
+  const payload = {
+    bodyHtml: note.bodyHtml || '',
+    rawBody: note.rawBody || '',
+    formula: note.formula || '',
+    sections: note.sections || []
+  };
+
+  const encryptedPayload = await encryptTextPayload(JSON.stringify(payload));
+
+  return {
+    ...note,
+    isEncrypted: true,
+    encryptedPayload
+  };
+}
+
+/**
+ * Decrypt full note payload object on-the-fly when serving in note applet
+ */
+export async function decryptNoteData(note) {
+  if (!note || !note.isEncrypted || !note.encryptedPayload) {
+    return note;
+  }
+
+  try {
+    const jsonStr = await decryptTextPayload(note.encryptedPayload);
+    const decrypted = JSON.parse(jsonStr);
+
+    return {
+      ...note,
+      bodyHtml: decrypted.bodyHtml,
+      rawBody: decrypted.rawBody,
+      formula: decrypted.formula,
+      sections: decrypted.sections || [],
+      isDecrypted: true
+    };
+  } catch (err) {
+    return note;
+  }
+}
