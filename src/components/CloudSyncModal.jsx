@@ -335,15 +335,15 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
     setIsProcessing(true);
     setStatusMsg(null);
     try {
-      const zipFilename = `EduKatalyst_Master_Backup_${new Date().toISOString().slice(0,10)}.zip`;
-      setStatusMsg({ type: 'info', text: 'Packaging master encrypted library into Zip file...' });
+      const zipFilename = `EduKatalyst_Official_Master_Library_${new Date().toISOString().slice(0,10)}.zip`;
+      setStatusMsg({ type: 'info', text: 'Packaging all videos, notes, quizzes, and subjects into master library...' });
 
       await exportMasterBundle(sessions, async (blob) => {
-        setStatusMsg({ type: 'info', text: 'Uploading master archive to Google Drive "EduKatalyst Storage" folder...' });
+        setStatusMsg({ type: 'info', text: 'Publishing master library to Google Drive "EduKatalyst Storage" folder...' });
         const driveFile = await uploadZipToDrive(blob, zipFilename, driveToken);
         setStatusMsg({ 
           type: 'success', 
-          text: `Uploaded Master Backup "${driveFile.name}" to Google Drive!` 
+          text: `🚀 Successfully Published Official Master Library ("${driveFile.name}") to Google Drive!` 
         });
 
         const files = await listDriveBackups(driveToken);
@@ -351,7 +351,7 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
       });
 
     } catch (err) {
-      setStatusMsg({ type: 'error', text: `Master Drive Upload Failed: ${err.message}` });
+      setStatusMsg({ type: 'error', text: `Official Drive Publish Failed: ${err.message}` });
     } finally {
       setIsProcessing(false);
     }
@@ -634,51 +634,91 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
 
           </div>
 
-          {/* Drive Sessions Upload List */}
-          <div className="p-5 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)] space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[var(--border-color)] pb-2">
-              <h4 className="font-bold text-[var(--text-primary)] flex items-center gap-2">
-                <Upload className="w-4 h-4 text-[var(--accent-coral)]" />
-                Upload Sessions to Google Drive ({sessions.length})
-              </h4>
+          {/* Drive Master Content Publishing Card */}
+          <div className="p-5 rounded-2xl bg-gradient-to-r from-[var(--accent-coral)]/10 via-[var(--bg-surface)] to-[var(--bg-surface)] border border-[var(--border-color)] space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--border-color)] pb-3">
+              <div className="space-y-1">
+                <h4 className="font-bold text-[var(--text-primary)] text-sm flex items-center gap-2">
+                  <Upload className="w-4 h-4 text-[var(--accent-coral)]" />
+                  <span>Publish Study Materials to Official Google Drive</span>
+                </h4>
+                <p className="text-[11px] text-[var(--text-muted)]">
+                  Publish all videos, notes, quizzes, and subjects to the official Google Drive folder for instant visitor access.
+                </p>
+              </div>
 
               {sessions.length > 0 && (
                 <button
                   onClick={handleUploadMasterZipToDrive}
                   disabled={!driveUser || isProcessing}
-                  className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-[var(--accent-coral)] to-[var(--accent-peach)] text-[#1D1214] font-bold text-[11px] flex items-center space-x-1.5 transition shrink-0 disabled:opacity-50"
+                  className="px-4 py-2.5 rounded-xl bg-[var(--accent-coral)] text-white dark:text-[#261619] font-extrabold text-xs flex items-center space-x-2 transition shadow-lg hover:opacity-90 shrink-0 disabled:opacity-50 cursor-pointer"
                 >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Upload Master Archive Zip</span>
+                  <Upload className="w-4 h-4" />
+                  <span>🚀 Publish All Master Content to Official Drive</span>
                 </button>
               )}
             </div>
 
+            {/* Content Type Statistics Badges */}
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <span className="px-2.5 py-1 rounded-lg bg-[var(--bg-ground)] border border-[var(--border-color)] text-[11px] font-mono text-[var(--text-secondary)] flex items-center gap-1.5">
+                <span>📹 Videos:</span>
+                <strong className="text-[var(--accent-coral)] font-bold">
+                  {sessions.filter(s => !s.id.startsWith('note_') && !s.id.startsWith('quiz_')).length}
+                </strong>
+              </span>
+
+              <span className="px-2.5 py-1 rounded-lg bg-[var(--bg-ground)] border border-[var(--border-color)] text-[11px] font-mono text-[var(--text-secondary)] flex items-center gap-1.5">
+                <span>📝 Notes:</span>
+                <strong className="text-[var(--accent-peach)] font-bold">
+                  {sessions.filter(s => s.id.startsWith('note_')).length}
+                </strong>
+              </span>
+
+              <span className="px-2.5 py-1 rounded-lg bg-[var(--bg-ground)] border border-[var(--border-color)] text-[11px] font-mono text-[var(--text-secondary)] flex items-center gap-1.5">
+                <span>❓ Quizzes:</span>
+                <strong className="text-emerald-400 font-bold">
+                  {sessions.filter(s => s.id.startsWith('quiz_')).length}
+                </strong>
+              </span>
+            </div>
+
             {sessions.length === 0 ? (
               <p className="text-[var(--text-muted)] text-[11px] py-2">
-                No encrypted sessions stored in local IndexedDB. Encrypt a lecture first.
+                No study materials stored in local storage. Create a video lecture, note, or quiz in Creator Studio first.
               </p>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {sessions.map((s) => (
-                  <div key={s.id} className="p-3.5 rounded-xl bg-[var(--bg-ground)] border border-[var(--border-color)] flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="font-bold text-[var(--text-primary)] truncate">{s.title}</div>
-                      <div className="text-[10px] text-[var(--text-muted)] font-mono mt-0.5">
-                        {s.segmentCount} segments • {(s.totalSizeBytes / 1024 / 1024).toFixed(2)} MB
-                      </div>
-                    </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
+                {sessions.map((s) => {
+                  const isNote = s.id.startsWith('note_');
+                  const isQuiz = s.id.startsWith('quiz_');
+                  const typeLabel = isNote ? '📝 Note' : isQuiz ? '❓ Quiz' : '📹 Video';
 
-                    <button
-                      onClick={() => handleUploadZipToDrive(s)}
-                      disabled={!driveUser || isProcessing}
-                      className="px-3 py-1.5 rounded-lg bg-[var(--accent-coral)] text-[#1D1214] font-bold text-[11px] flex items-center space-x-1 transition shrink-0 disabled:opacity-50"
-                    >
-                      <Upload className="w-3.5 h-3.5" />
-                      <span>Upload Zip</span>
-                    </button>
-                  </div>
-                ))}
+                  return (
+                    <div key={s.id} className="p-3.5 rounded-xl bg-[var(--bg-ground)] border border-[var(--border-color)] flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-surface)] border border-[var(--border-color)] font-mono text-[var(--accent-coral)]">
+                            {typeLabel}
+                          </span>
+                          <span className="font-bold text-[var(--text-primary)] truncate text-xs">{s.title}</span>
+                        </div>
+                        <div className="text-[10px] text-[var(--text-muted)] font-mono mt-1">
+                          Subject: {s.category || 'General'} • {( (s.totalSizeBytes || 0) / 1024 / 1024).toFixed(2)} MB
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => handleUploadZipToDrive(s)}
+                        disabled={!driveUser || isProcessing}
+                        className="px-3 py-1.5 rounded-lg bg-[var(--accent-coral)] text-white dark:text-[#261619] font-bold text-[11px] flex items-center space-x-1 transition shrink-0 disabled:opacity-50 cursor-pointer"
+                      >
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>Publish</span>
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>

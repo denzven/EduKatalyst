@@ -118,63 +118,96 @@ export default function VideoLibrary({
     <div className="space-y-6 max-w-5xl mx-auto transition-colors duration-300">
       
       {/* Header Bar */}
-      <div className="flex flex-col md:flex-row items-center justify-between gap-4 p-4 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)]">
-        <div>
-          <h2 className="text-base font-bold font-serif text-[var(--text-primary)] flex items-center gap-2">
-            <HardDrive className="w-4 h-4 text-[var(--accent-coral)]" />
-            Video Library
-          </h2>
-          <p className="text-xs text-[var(--text-muted)] mt-0.5">
-            {sessions.length} video(s) stored
-          </p>
+      <div className="p-5 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)] space-y-4">
+        <div className="flex flex-col md:flex-row items-center justify-between gap-4 border-b border-[var(--border-color)] pb-3">
+          <div>
+            <h2 className="text-base font-bold font-heading text-[var(--text-primary)] flex items-center gap-2">
+              <HardDrive className="w-4 h-4 text-[var(--accent-coral)]" />
+              <span>Storage & Master Content Manager</span>
+            </h2>
+            <p className="text-xs text-[var(--text-muted)] mt-0.5">
+              Inspect, export, and publish all stored educational materials (Videos, Notes, Quizzes, and Taxonomies)
+            </p>
+          </div>
+
+          <div className="flex items-center space-x-2 w-full md:w-auto overflow-x-auto">
+            {onOpenCloudSync && (
+              <button
+                onClick={onOpenCloudSync}
+                className="flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-[var(--accent-coral)] text-white dark:text-[#261619] font-extrabold text-xs shadow-md transition shrink-0 cursor-pointer hover:opacity-90"
+              >
+                <Cloud className="w-4 h-4" />
+                <span>🚀 Publish to Official Drive</span>
+              </button>
+            )}
+
+            {sessions.length > 0 && (
+              <button
+                onClick={handleMasterExport}
+                disabled={isExportingMaster}
+                className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-[var(--bg-ground)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border-color)] text-[var(--text-primary)] text-xs font-semibold transition shrink-0"
+                title="Download Master Zip Archive"
+              >
+                <Download className="w-3.5 h-3.5 text-[var(--accent-coral)]" />
+                <span>{isExportingMaster ? 'Exporting...' : 'Export All (Zip)'}</span>
+              </button>
+            )}
+
+            <input
+              ref={zipInputRef}
+              type="file"
+              accept=".zip"
+              onChange={handleImportZipSelect}
+              className="hidden"
+            />
+            <button
+              onClick={() => zipInputRef.current?.click()}
+              disabled={isImporting}
+              className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-[var(--bg-ground)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border-color)] text-[var(--text-primary)] text-xs font-semibold transition shrink-0"
+            >
+              <FileArchive className="w-3.5 h-3.5 text-[var(--accent-coral)]" />
+              <span>Import Zip</span>
+            </button>
+
+            <button
+              onClick={handleClearAll}
+              className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-rose-950/60 hover:bg-rose-900/60 border border-rose-500/30 text-rose-300 text-xs font-semibold transition shrink-0"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Clear All</span>
+            </button>
+          </div>
         </div>
 
-        <div className="flex items-center space-x-2 w-full md:w-auto overflow-x-auto">
-          {sessions.length > 0 && (
-            <button
-              onClick={handleMasterExport}
-              disabled={isExportingMaster}
-              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-[var(--accent-coral)] text-[#1D1214] text-xs font-bold shadow-md transition shrink-0"
-              title="Download Master Zip Archive"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>{isExportingMaster ? 'Exporting...' : 'Export All (Zip)'}</span>
-            </button>
-          )}
+        {/* Content Type Breakdown Grid */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="p-3 rounded-xl bg-[var(--bg-ground)] border border-[var(--border-color)] space-y-0.5">
+            <span className="text-[10px] text-[var(--text-muted)] uppercase font-mono block">Video Lectures</span>
+            <span className="text-sm font-extrabold font-heading text-[var(--accent-coral)]">
+              {sessions.filter(s => !s.id.startsWith('note_') && !s.id.startsWith('quiz_')).length}
+            </span>
+          </div>
 
-          {onOpenCloudSync && (
-            <button
-              onClick={onOpenCloudSync}
-              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-[var(--bg-ground)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border-color)] text-[var(--text-primary)] text-xs font-semibold transition shrink-0"
-            >
-              <Cloud className="w-3.5 h-3.5 text-[var(--accent-coral)]" />
-              <span>Cloud Sync</span>
-            </button>
-          )}
+          <div className="p-3 rounded-xl bg-[var(--bg-ground)] border border-[var(--border-color)] space-y-0.5">
+            <span className="text-[10px] text-[var(--text-muted)] uppercase font-mono block">Markdown Notes</span>
+            <span className="text-sm font-extrabold font-heading text-[var(--accent-peach)]">
+              {sessions.filter(s => s.id.startsWith('note_')).length}
+            </span>
+          </div>
 
-          <input
-            ref={zipInputRef}
-            type="file"
-            accept=".zip"
-            onChange={handleImportZipSelect}
-            className="hidden"
-          />
-          <button
-            onClick={() => zipInputRef.current?.click()}
-            disabled={isImporting}
-            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-[var(--bg-ground)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border-color)] text-[var(--text-primary)] text-xs font-semibold transition shrink-0"
-          >
-            <FileArchive className="w-3.5 h-3.5 text-[var(--accent-coral)]" />
-            <span>Import Zip</span>
-          </button>
+          <div className="p-3 rounded-xl bg-[var(--bg-ground)] border border-[var(--border-color)] space-y-0.5">
+            <span className="text-[10px] text-[var(--text-muted)] uppercase font-mono block">Quizzes & Exams</span>
+            <span className="text-sm font-extrabold font-heading text-emerald-400">
+              {sessions.filter(s => s.id.startsWith('quiz_')).length}
+            </span>
+          </div>
 
-          <button
-            onClick={handleClearAll}
-            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-rose-950/60 hover:bg-rose-900/60 border border-rose-500/30 text-rose-300 text-xs font-semibold transition shrink-0"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            <span>Clear All</span>
-          </button>
+          <div className="p-3 rounded-xl bg-[var(--bg-ground)] border border-[var(--border-color)] space-y-0.5">
+            <span className="text-[10px] text-[var(--text-muted)] uppercase font-mono block">Total Storage Size</span>
+            <span className="text-sm font-extrabold font-mono text-[var(--text-primary)]">
+              {((sessions.reduce((sum, s) => sum + (s.totalSizeBytes || 0), 0)) / 1024 / 1024).toFixed(2)} MB
+            </span>
+          </div>
         </div>
       </div>
 
