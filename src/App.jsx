@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import Header from './components/Header';
 import StudentPortal from './components/StudentPortal';
 import LandingPage from './components/LandingPage';
@@ -6,66 +6,34 @@ import Preloader from './components/Preloader';
 import DevStudioModal from './components/DevStudioModal';
 import SettingsModal from './components/SettingsModal';
 import MobileBottomNav from './components/MobileBottomNav';
-import { getAllVideoSessions } from './utils/storage';
-import { isCreatorAuthenticated } from './utils/auth';
-import { parseHash, navigateTo, subscribeToHash } from './utils/router';
-import { initPWA } from './utils/pwaHelper';
-import { initTheme } from './utils/theme';
+import { AppShellProvider, useAppShell } from './core/AppShellContext';
 
-export default function App() {
-  const [currentPreset, setCurrentPreset] = useState(() => initTheme());
+function AppContent() {
+  const { 
+    activeTab, 
+    routeParams, 
+    navigateToTab, 
+    sessions, 
+    refreshSessions, 
+    isCreatorAuth, 
+    setIsCreatorAuth, 
+    currentPreset, 
+    setCurrentPreset,
+    isLoading,
+    setIsLoading 
+  } = useAppShell();
+
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [sessions, setSessions] = useState([]);
-  const [isCreatorAuth, setIsCreatorAuth] = useState(false);
-  const [isDevModalOpen, setIsDevModalOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  
-  // Router State
-  const [routeState, setRouteState] = useState(() => parseHash());
 
-  const activePortalTab = routeState.tab === 'studio' || routeState.tab === 'landing' 
+  const activePortalTab = activeTab === 'studio' || activeTab === 'landing' 
     ? 'explorer' 
-    : routeState.tab;
+    : activeTab;
 
-  const isLandingPage = routeState.tab === 'landing';
-  const isStudioPage = routeState.tab === 'studio';
+  const isLandingPage = activeTab === 'landing';
+  const isStudioPage = activeTab === 'studio';
 
-  const refreshSessions = async () => {
-    try {
-      const list = await getAllVideoSessions();
-      setSessions(list || []);
-    } catch (err) {
-      console.error('Error fetching video sessions:', err);
-    }
-  };
-
-  useEffect(() => {
-    initTheme();
-    initPWA();
-    refreshSessions();
-    setIsCreatorAuth(isCreatorAuthenticated());
-
-    // Subscribe to browser URL hash changes
-    const unsubscribe = subscribeToHash((newRoute) => {
-      setRouteState(newRoute);
-      window.scrollTo(0, 0);
-    });
-
-    return unsubscribe;
-  }, []);
-
-  const handleTabChange = (tab, params = {}) => {
-    window.scrollTo(0, 0);
-    navigateTo(tab, params);
-  };
-
-  const handleOpenStudio = () => {
-    navigateTo('studio');
-  };
-
-  const handleCloseStudio = () => {
-    navigateTo('explorer');
-  };
+  const handleOpenStudio = () => navigateToTab('studio');
+  const handleCloseStudio = () => navigateToTab('explorer');
 
   return (
     <div className="min-h-screen bg-[var(--bg-ground)] text-[var(--text-primary)] flex flex-col font-sans relative transition-colors duration-300">
@@ -85,7 +53,7 @@ export default function App() {
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {isLandingPage ? (
           <LandingPage
-            onProceed={() => handleTabChange('explorer')}
+            onProceed={() => navigateToTab('explorer')}
             onOpenStudio={handleOpenStudio}
           />
         ) : isStudioPage ? (
@@ -97,7 +65,7 @@ export default function App() {
             sessions={sessions}
             onRefreshSessions={refreshSessions}
             onSelectSessionForPlayer={(id) => {
-              handleTabChange('lessons');
+              navigateToTab('lessons', { id });
             }}
           />
         ) : (
@@ -105,8 +73,8 @@ export default function App() {
             sessions={sessions}
             onOpenDevStudio={handleOpenStudio}
             activePortalTab={activePortalTab}
-            setActivePortalTab={handleTabChange}
-            routeParams={routeState.params}
+            setActivePortalTab={navigateToTab}
+            routeParams={routeParams}
           />
         )}
       </main>
@@ -115,7 +83,7 @@ export default function App() {
       {!isLandingPage && !isStudioPage && (
         <MobileBottomNav
           activePortalTab={activePortalTab}
-          setActivePortalTab={handleTabChange}
+          setActivePortalTab={navigateToTab}
           onOpenDevStudio={handleOpenStudio}
         />
       )}
@@ -141,5 +109,13 @@ export default function App() {
       </footer>
 
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AppShellProvider>
+      <AppContent />
+    </AppShellProvider>
   );
 }

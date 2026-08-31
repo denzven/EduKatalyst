@@ -37,6 +37,8 @@ jobs:
         run: npm ci
 
       - name: Build with Vite
+        env:
+          VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID || '119791404749-o4a3g19ps1sjvkgmcf9qj62ih9l5mcpp.apps.googleusercontent.com' }}
         run: npm run build
 
       - name: Upload artifact

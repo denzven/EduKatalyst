@@ -1,20 +1,24 @@
 /**
  * Google Drive Integration Utility
- * Handles Google Drive API v3 for client-side cloud backup & sync.
+ * Handles Google Drive API v3 and Google OAuth 2.0 Sign-In for client-side cloud backup & sync.
  */
 
 const DRIVE_TOKEN_KEY = 'katalyst_drive_access_token';
+const CLIENT_ID_KEY = 'katalyst_google_client_id';
 const FOLDER_NAME = 'EduKatalyst Storage';
 
+// Default Client ID loaded securely from environment variables (.env)
+const DEFAULT_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '119791404749-o4a3g19ps1sjvkgmcf9qj62ih9l5mcpp.apps.googleusercontent.com';
+
 /**
- * Retrieve stored Google Drive OAuth access token
+ * Retrieve stored Google OAuth Access Token
  */
 export function getStoredDriveToken() {
   return localStorage.getItem(DRIVE_TOKEN_KEY) || '';
 }
 
 /**
- * Save Google Drive OAuth access token
+ * Save or clear Google OAuth Access Token
  */
 export function setStoredDriveToken(token) {
   if (token) {
@@ -25,7 +29,29 @@ export function setStoredDriveToken(token) {
 }
 
 /**
- * Validate current Google Drive Access Token
+ * Retrieve stored Google Client ID
+ */
+export function getStoredClientId() {
+  const stored = localStorage.getItem(CLIENT_ID_KEY);
+  if (!stored || stored.includes('982845620958')) {
+    return DEFAULT_CLIENT_ID;
+  }
+  return stored;
+}
+
+/**
+ * Save Google Client ID
+ */
+export function setStoredClientId(clientId) {
+  if (clientId) {
+    localStorage.setItem(CLIENT_ID_KEY, clientId.trim());
+  } else {
+    localStorage.removeItem(CLIENT_ID_KEY);
+  }
+}
+
+/**
+ * Validate current Google Drive Access Token and retrieve account email
  */
 export async function validateDriveToken(accessToken) {
   const token = accessToken || getStoredDriveToken();
@@ -35,15 +61,152 @@ export async function validateDriveToken(accessToken) {
 
   const response = await fetch(`https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${encodeURIComponent(token)}`);
   if (!response.ok) {
-    throw new Error('Invalid or expired Google Drive Access Token.');
+    throw new Error('Invalid or expired Google Drive Access Token. Please sign in again.');
   }
 
   const data = await response.json();
+  
+  // Also fetch user profile email if available
+  let email = data.email || '';
+  if (!email) {
+    try {
+      const userRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (userRes.ok) {
+        const userInfo = await userRes.json();
+        email = userInfo.email || userInfo.name || 'Google User';
+      }
+    } catch {
+      // Ignore userinfo error if scope restricted
+    }
+  }
+
   return {
-    email: data.email,
+    email: email || 'Authorized Account',
     expiresIn: data.expires_in,
     scope: data.scope,
   };
+}
+
+/**
+ * Load Google Identity Services SDK dynamically
+ */
+export function loadGoogleGsiScript() {
+  return new Promise((resolve, reject) => {
+    if (window.google?.accounts?.oauth2) {
+      resolve(window.google.accounts.oauth2);
+      return;
+    }
+
+    const existingScript = document.getElementById('google-gsi-script');
+    if (existingScript) {
+      existingScript.addEventListener('load', () => resolve(window.google?.accounts?.oauth2));
+      existingScript.addEventListener('error', reject);
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.id = 'google-gsi-script';
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    script.onload = () => resolve(window.google?.accounts?.oauth2);
+    script.onerror = (err) => reject(new Error('Failed to load Google Identity Services SDK'));
+    document.head.appendChild(script);
+  });
+}
+
+/**
+ * Trigger official Google Account Sign-In OAuth 2.0 authorization page/popup
+ */
+export async function promptGoogleDriveSignIn(customClientId = '') {
+  const clientId = customClientId || getStoredClientId();
+  if (!clientId) {
+    throw new Error('Google OAuth Client ID is required.');
+  }
+
+  try {
+    const oauth2 = await loadGoogleGsiScript();
+    return new Promise((resolve, reject) => {
+      const tokenClient = oauth2.initTokenClient({
+        client_id: clientId,
+        scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email profile',
+        prompt: 'select_account',
+        callback: (response) => {
+          if (response.error) {
+            reject(new Error(response.error_description || response.error));
+            return;
+          }
+          if (response.access_token) {
+            setStoredDriveToken(response.access_token);
+            resolve(response.access_token);
+          } else {
+            reject(new Error('No access token returned from Google Sign-In.'));
+          }
+        },
+      });
+
+      tokenClient.requestAccessToken();
+    });
+  } catch (err) {
+    // Fallback: standard popup window if GIS SDK fails to initialize
+    return openGoogleOAuthPopupFallback(clientId);
+  }
+}
+
+/**
+ * Fallback popup window authorization method
+ */
+function openGoogleOAuthPopupFallback(clientId) {
+  return new Promise((resolve, reject) => {
+    const redirectUri = window.location.origin + window.location.pathname;
+    const scope = encodeURIComponent('https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email profile');
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${scope}&prompt=select_account`;
+
+    const width = 500;
+    const height = 650;
+    const left = window.screenX + (window.outerWidth - width) / 2;
+    const top = window.screenY + (window.outerHeight - height) / 2;
+
+    const popup = window.open(
+      authUrl,
+      'GoogleAccountSignIn',
+      `width=${width},height=${height},top=${top},left=${left},scrollbars=yes`
+    );
+
+    if (!popup) {
+      reject(new Error('Popup blocked! Please allow popups for this site to sign in with Google.'));
+      return;
+    }
+
+    const timer = setInterval(() => {
+      try {
+        if (!popup || popup.closed) {
+          clearInterval(timer);
+          reject(new Error('Google Sign-In window closed.'));
+          return;
+        }
+
+        const popupUrl = popup.location.href;
+        if (popupUrl && popupUrl.includes('#access_token=')) {
+          clearInterval(timer);
+          const hashParams = new URLSearchParams(popupUrl.split('#')[1]);
+          const token = hashParams.get('access_token');
+          popup.close();
+
+          if (token) {
+            setStoredDriveToken(token);
+            resolve(token);
+          } else {
+            reject(new Error('Failed to retrieve access token from Google Sign-In.'));
+          }
+        }
+      } catch {
+        // Ignore cross-origin errors while user navigates Google Sign-In pages
+      }
+    }, 500);
+  });
 }
 
 /**

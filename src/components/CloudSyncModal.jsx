@@ -14,7 +14,10 @@ import {
   Trash2,
   Lock,
   FileCode,
-  FolderArchive
+  FolderArchive,
+  LogOut,
+  Settings,
+  HelpCircle
 } from 'lucide-react';
 
 function GithubIcon({ className = "w-4 h-4" }) {
@@ -25,6 +28,18 @@ function GithubIcon({ className = "w-4 h-4" }) {
     </svg>
   );
 }
+
+function GoogleIcon({ className = "w-4 h-4" }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24">
+      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+    </svg>
+  );
+}
+
 import { 
   getStoredGitHubToken, 
   setStoredGitHubToken, 
@@ -36,6 +51,9 @@ import {
 import { 
   getStoredDriveToken, 
   setStoredDriveToken, 
+  getStoredClientId,
+  setStoredClientId,
+  promptGoogleDriveSignIn,
   validateDriveToken, 
   uploadZipToDrive, 
   listDriveBackups, 
@@ -45,7 +63,7 @@ import { exportSessionToZip, importSessionFromZip, exportMasterBundle } from '..
 import { saveVideoSession } from '../utils/storage';
 
 export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
-  const [activeTab, setActiveTab] = useState('github'); // 'github' | 'gdrive'
+  const [activeTab, setActiveTab] = useState('gdrive'); // default to gdrive
   
   // GitHub State
   const [githubToken, setGithubToken] = useState(getStoredGitHubToken());
@@ -56,9 +74,13 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
   
   // Google Drive State
   const [driveToken, setDriveToken] = useState(getStoredDriveToken());
+  const [clientIdInput, setClientIdInput] = useState(() => getStoredClientId());
   const [driveUser, setDriveUser] = useState(null);
   const [isVerifyingDrive, setIsVerifyingDrive] = useState(false);
+  const [isSigningInGoogle, setIsSigningInGoogle] = useState(false);
   const [driveFiles, setDriveFiles] = useState([]);
+  const [showSetupGuide, setShowSetupGuide] = useState(false);
+  const [authMode, setAuthMode] = useState('signin'); // 'signin' | 'token'
   
   // Global Status & Action States
   const [statusMsg, setStatusMsg] = useState(null);
@@ -92,7 +114,6 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
       const user = await validateGitHubToken(tokenToUse);
       setGithubUser(user);
       if (!silent) setStatusMsg({ type: 'success', text: `Connected to GitHub as @${user.login}` });
-      // Fetch user gists
       const gists = await listUserGists();
       setGithubGists(gists);
     } catch (err) {
@@ -138,7 +159,6 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
         linkText: 'View Gist on GitHub'
       });
 
-      // Refresh gists list
       const gists = await listUserGists();
       setGithubGists(gists);
     } catch (err) {
@@ -161,7 +181,6 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
       const data = await importFromGitHubGist(id);
       
       if (Array.isArray(data.sessions)) {
-        // Bulk import metadata
         let importedCount = 0;
         for (const s of data.sessions) {
           await saveVideoSession(s);
@@ -169,7 +188,6 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
         }
         setStatusMsg({ type: 'success', text: `Restored ${importedCount} session(s) from GitHub Gist into local storage!` });
       } else if (data.id && data.playlistText) {
-        // Single session import
         await saveVideoSession(data);
         setStatusMsg({ type: 'success', text: `Restored session "${data.title || 'Video'}" from GitHub Gist!` });
       } else {
@@ -186,6 +204,57 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
   };
 
   // --- Google Drive Handlers ---
+  const handleGoogleSignIn = async () => {
+    const cleanedClientId = clientIdInput.trim();
+    if (!cleanedClientId) {
+      setStatusMsg({ 
+        type: 'error', 
+        text: 'Please paste your Google OAuth Client ID below before signing in. Expand the 3-step setup guide if you need a free Client ID.' 
+      });
+      setShowSetupGuide(true);
+      return;
+    }
+
+    setIsSigningInGoogle(true);
+    setStatusMsg(null);
+    try {
+      setStoredClientId(cleanedClientId);
+      const newToken = await promptGoogleDriveSignIn(cleanedClientId);
+      setDriveToken(newToken);
+      await handleTestDrive(newToken);
+    } catch (err) {
+      if (err.message.includes('400') || err.message.includes('origin_mismatch') || err.message.includes('origin')) {
+        setStatusMsg({ 
+          type: 'error', 
+          text: `Google OAuth Error 400 (origin_mismatch): Your browser is accessing "${window.location.origin}". Add "${window.location.origin}" to Authorized JavaScript origins in Google Cloud Console, or open "http://localhost:5173" in your browser.`,
+          link: 'https://console.cloud.google.com/apis/credentials',
+          linkText: 'Fix in Google Cloud Console'
+        });
+        setShowSetupGuide(true);
+      } else if (err.message.includes('401') || err.message.includes('invalid_client') || err.message.includes('client')) {
+        setStatusMsg({ 
+          type: 'error', 
+          text: 'Google OAuth Error 401: Invalid Client ID. Please verify your OAuth Client ID in Google Cloud Console.',
+          link: 'https://console.cloud.google.com/apis/credentials',
+          linkText: 'Open Google Cloud Console'
+        });
+        setShowSetupGuide(true);
+      } else {
+        setStatusMsg({ type: 'error', text: `Google Sign-In Failed: ${err.message}` });
+      }
+    } finally {
+      setIsSigningInGoogle(false);
+    }
+  };
+
+  const handleDisconnectDrive = () => {
+    setStoredDriveToken('');
+    setDriveToken('');
+    setDriveUser(null);
+    setDriveFiles([]);
+    setStatusMsg({ type: 'info', text: 'Disconnected Google Account.' });
+  };
+
   const handleSaveDriveToken = async () => {
     setStoredDriveToken(driveToken);
     setStatusMsg({ type: 'info', text: 'Google Drive access token saved.' });
@@ -203,7 +272,7 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
     try {
       const user = await validateDriveToken(tokenToUse);
       setDriveUser(user);
-      if (!silent) setStatusMsg({ type: 'success', text: `Connected to Google Drive (${user.email || 'Valid OAuth Token'})` });
+      if (!silent) setStatusMsg({ type: 'success', text: `Connected to Google Drive (${user.email})` });
       
       const files = await listDriveBackups(tokenToUse);
       setDriveFiles(files);
@@ -248,26 +317,24 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
   };
 
   const handleUploadMasterZipToDrive = async () => {
-    if (sessions.length === 0) {
-      setStatusMsg({ type: 'error', text: 'No video sessions stored in IndexedDB to upload.' });
-      return;
-    }
-
     setIsProcessing(true);
-    setStatusMsg({ type: 'info', text: `Building Master Storage Archive (${sessions.length} sessions)...` });
+    setStatusMsg(null);
     try {
-      const zipFilename = `edukatalyst_master_backup_${new Date().toISOString().slice(0, 10)}.zip`;
+      const zipFilename = `EduKatalyst_Master_Backup_${new Date().toISOString().slice(0,10)}.zip`;
+      setStatusMsg({ type: 'info', text: 'Packaging master encrypted library into Zip file...' });
+
       await exportMasterBundle(sessions, async (blob) => {
-        setStatusMsg({ type: 'info', text: `Uploading Master Archive package to Google Drive "EduKatalyst Storage" folder...` });
+        setStatusMsg({ type: 'info', text: 'Uploading master archive to Google Drive "EduKatalyst Storage" folder...' });
         const driveFile = await uploadZipToDrive(blob, zipFilename, driveToken);
         setStatusMsg({ 
           type: 'success', 
-          text: `Uploaded Master Archive "${driveFile.name}" to Google Drive successfully!` 
+          text: `Uploaded Master Backup "${driveFile.name}" to Google Drive!` 
         });
 
         const files = await listDriveBackups(driveToken);
         setDriveFiles(files);
       });
+
     } catch (err) {
       setStatusMsg({ type: 'error', text: `Master Drive Upload Failed: ${err.message}` });
     } finally {
@@ -277,16 +344,15 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
 
   const handleRestoreFromDrive = async (fileId, fileName) => {
     setIsProcessing(true);
-    setStatusMsg({ type: 'info', text: `Downloading "${fileName}" from Google Drive...` });
+    setStatusMsg(null);
     try {
+      setStatusMsg({ type: 'info', text: `Downloading "${fileName}" from Google Drive...` });
       const blob = await downloadFromDrive(fileId, driveToken);
-      const file = new File([blob], fileName, { type: 'application/zip' });
-      
-      setStatusMsg({ type: 'info', text: `Importing encrypted HLS video bundle into IndexedDB...` });
-      const session = await importSessionFromZip(file);
-      await saveVideoSession(session);
 
-      setStatusMsg({ type: 'success', text: `Successfully restored "${session.title}" from Google Drive!` });
+      setStatusMsg({ type: 'info', text: `Extracting Zip package into IndexedDB...` });
+      await importSessionFromZip(blob);
+
+      setStatusMsg({ type: 'success', text: `Restored session from "${fileName}" successfully!` });
       onRefreshSessions?.();
     } catch (err) {
       setStatusMsg({ type: 'error', text: `Drive Restore Failed: ${err.message}` });
@@ -296,81 +362,363 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
   };
 
   return (
-    <div className="space-y-6 max-w-4xl mx-auto text-xs transition-colors duration-300">
+    <div className="space-y-6 text-xs text-[var(--text-primary)]">
       
-      {/* Top Banner / Explanation */}
-      <div className="p-4 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)] flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div className="flex items-center space-x-3">
-          <div className="p-2.5 bg-[var(--accent-coral)]/15 border border-[var(--accent-coral)]/30 text-[var(--accent-coral)] rounded-xl">
-            <Cloud className="w-6 h-6" />
-          </div>
-          <div>
-            <h3 className="text-sm font-bold text-[var(--text-primary)] font-serif">
-              Cloud Sync & Backups
-            </h3>
-            <p className="text-[var(--text-muted)] text-[11px] mt-0.5">
-              Connect GitHub or Google Drive to backup your video library across devices
-            </p>
-          </div>
-        </div>
-
-        {/* Tab Selection */}
-        <div className="flex items-center space-x-2 bg-[var(--bg-ground)] p-1 rounded-xl border border-[var(--border-color)] shrink-0">
-          <button
-            onClick={() => { setActiveTab('github'); setStatusMsg(null); }}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg font-semibold transition ${
-              activeTab === 'github'
-                ? 'bg-[var(--accent-coral)] text-[#1D1214] font-bold shadow-sm'
-                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-            }`}
-          >
-            <GithubIcon className="w-4 h-4" />
-            <span>GitHub</span>
-          </button>
-
-          <button
-            onClick={() => { setActiveTab('gdrive'); setStatusMsg(null); }}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg font-semibold transition ${
-              activeTab === 'gdrive'
-                ? 'bg-[var(--accent-coral)] text-[#1D1214] font-bold shadow-sm'
-                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-            }`}
-          >
-            <HardDrive className="w-4 h-4" />
-            <span>Google Drive</span>
-          </button>
+      {/* Header Banner */}
+      <div className="p-4 rounded-2xl bg-gradient-to-r from-[var(--accent-coral)]/15 via-[var(--accent-peach)]/10 to-transparent border border-[var(--border-color)] flex items-center justify-between">
+        <div className="space-y-1">
+          <h3 className="text-sm font-bold font-heading text-[var(--text-primary)] flex items-center gap-2">
+            <Cloud className="w-4 h-4 text-[var(--accent-coral)]" />
+            <span>EduKatalyst Cloud Sync & Backup Engine</span>
+          </h3>
+          <p className="text-[11px] text-[var(--text-muted)]">
+            Sync lecture encryption keys, video stream bundles, and metadata across your devices using Google Drive or GitHub.
+          </p>
         </div>
       </div>
 
-      {/* Global Status Notification */}
-      {statusMsg && (
-        <div className={`p-3.5 rounded-xl border flex items-center justify-between gap-3 ${
-          statusMsg.type === 'success' ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-200' :
-          statusMsg.type === 'error' ? 'bg-rose-950/40 border-rose-500/30 text-rose-300' :
-          'bg-sky-950/40 border-sky-500/30 text-sky-200'
-        }`}>
-          <div className="flex items-center space-x-2 min-w-0">
-            {statusMsg.type === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />}
-            {statusMsg.type === 'error' && <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />}
-            {statusMsg.type === 'info' && <Info className="w-4 h-4 text-sky-400 shrink-0" />}
-            <span className="truncate">{statusMsg.text}</span>
-          </div>
+      {/* Cloud Provider Tabs */}
+      <div className="flex border-b border-[var(--border-color)] space-x-4">
+        <button
+          onClick={() => setActiveTab('gdrive')}
+          className={`pb-2.5 font-bold transition flex items-center space-x-2 border-b-2 ${
+            activeTab === 'gdrive'
+              ? 'border-[var(--accent-coral)] text-[var(--accent-coral)]'
+              : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+          }`}
+        >
+          <GoogleIcon className="w-4 h-4" />
+          <span>Google Drive Sync</span>
+          {driveUser && <span className="w-2 h-2 rounded-full bg-emerald-400"></span>}
+        </button>
 
-          {statusMsg.link && (
-            <a
-              href={statusMsg.link}
-              target="_blank"
-              rel="noreferrer"
-              className="flex items-center space-x-1 text-[var(--accent-peach)] hover:underline font-mono text-[11px] shrink-0"
-            >
-              <span>{statusMsg.linkText || 'Open Link'}</span>
-              <ExternalLink className="w-3 h-3" />
-            </a>
+        <button
+          onClick={() => setActiveTab('github')}
+          className={`pb-2.5 font-bold transition flex items-center space-x-2 border-b-2 ${
+            activeTab === 'github'
+              ? 'border-[var(--accent-coral)] text-[var(--accent-coral)]'
+              : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+          }`}
+        >
+          <GithubIcon className="w-4 h-4" />
+          <span>GitHub Gist Sync</span>
+          {githubUser && <span className="w-2 h-2 rounded-full bg-emerald-400"></span>}
+        </button>
+      </div>
+
+      {/* Global Status Message Alert */}
+      {statusMsg && (
+        <div className={`p-3.5 rounded-xl border flex items-start space-x-2 font-mono ${
+          statusMsg.type === 'error'
+            ? 'bg-rose-950/40 border-rose-500/40 text-rose-300'
+            : statusMsg.type === 'success'
+            ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
+            : 'bg-amber-950/40 border-amber-500/40 text-amber-300'
+        }`}>
+          {statusMsg.type === 'error' ? (
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
+          ) : statusMsg.type === 'success' ? (
+            <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5 text-emerald-400" />
+          ) : (
+            <Info className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
           )}
+
+          <div className="flex-1 min-w-0">
+            <span>{statusMsg.text}</span>
+            {statusMsg.link && (
+              <a
+                href={statusMsg.link}
+                target="_blank"
+                rel="noreferrer"
+                className="ml-2 underline hover:text-white inline-flex items-center gap-1 font-bold"
+              >
+                <span>{statusMsg.linkText || 'View Link'}</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            )}
+          </div>
         </div>
       )}
 
-      {/* ================= GITHUB TAB ================= */}
+      {/* ================= GOOGLE DRIVE TAB ================= */}
+      {activeTab === 'gdrive' && (
+        <div className="space-y-5">
+          
+          {/* Google Account Authentication Card */}
+          <div className="p-5 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)] space-y-4">
+            <div className="flex items-center justify-between border-b border-[var(--border-color)] pb-3">
+              <div className="flex items-center space-x-2">
+                <GoogleIcon className="w-5 h-5" />
+                <h4 className="font-bold text-[var(--text-primary)] text-sm">Google Drive Integration</h4>
+              </div>
+
+              {driveUser ? (
+                <div className="flex items-center space-x-2 bg-emerald-950/60 border border-emerald-500/30 text-emerald-300 px-3 py-1 rounded-full text-xs font-mono">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span>{driveUser.email || 'Authorized'}</span>
+                </div>
+              ) : (
+                <span className="text-[var(--text-muted)] text-[11px]">Not Connected</span>
+              )}
+            </div>
+
+            {driveUser ? (
+              <div className="flex items-center justify-between p-3.5 rounded-xl bg-[var(--bg-ground)] border border-[var(--border-color)]">
+                <div className="space-y-0.5">
+                  <div className="font-bold text-[var(--text-primary)] text-xs flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    <span>Signed in as {driveUser.email}</span>
+                  </div>
+                  <p className="text-[11px] text-[var(--text-muted)]">
+                    EduKatalyst sync is active for your Google Drive "EduKatalyst Storage" folder.
+                  </p>
+                </div>
+
+                <button
+                  onClick={handleDisconnectDrive}
+                  className="px-3 py-1.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 border border-rose-500/30 text-rose-300 font-semibold text-xs flex items-center space-x-1.5 transition cursor-pointer"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>Sign Out</span>
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                
+                {/* Method Switcher Tabs */}
+                <div className="flex bg-[var(--bg-ground)] p-1 rounded-xl border border-[var(--border-color)]">
+                  <button
+                    onClick={() => setAuthMode('signin')}
+                    className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition ${
+                      authMode === 'signin' 
+                        ? 'bg-[var(--accent-coral)] text-white dark:text-[#261619] shadow' 
+                        : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                    }`}
+                  >
+                    Google Sign-In Page
+                  </button>
+                  <button
+                    onClick={() => setAuthMode('token')}
+                    className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition ${
+                      authMode === 'token' 
+                        ? 'bg-[var(--accent-coral)] text-white dark:text-[#261619] shadow' 
+                        : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                    }`}
+                  >
+                    Direct Access Token
+                  </button>
+                </div>
+
+                {authMode === 'signin' ? (
+                  <div className="space-y-3.5">
+                    <div className="space-y-1.5">
+                      <label className="text-[var(--text-primary)] font-bold text-xs flex items-center justify-between">
+                        <span>Google OAuth Client ID</span>
+                        <a 
+                          href="https://console.cloud.google.com/apis/credentials"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[var(--accent-peach)] hover:underline text-[11px] font-mono flex items-center gap-0.5"
+                        >
+                          <span>Get Client ID</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </label>
+                      
+                      <div className="relative">
+                        <Key className="w-4 h-4 absolute left-3 top-2.5 text-[var(--text-muted)]" />
+                        <input
+                          type="text"
+                          placeholder="e.g. 1234567890-abc.apps.googleusercontent.com"
+                          value={clientIdInput}
+                          onChange={(e) => setClientIdInput(e.target.value)}
+                          className="w-full bg-[var(--bg-ground)] border border-[var(--border-color)] rounded-xl pl-9 pr-3 py-2 text-xs text-[var(--text-primary)] font-mono placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-coral)] transition"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Primary Google Sign-In Button */}
+                    <button
+                      onClick={handleGoogleSignIn}
+                      disabled={isSigningInGoogle}
+                      className="w-full py-3 px-4 rounded-xl bg-white hover:bg-gray-100 text-gray-900 font-bold text-xs shadow-md border border-gray-300 flex items-center justify-center space-x-2.5 transition active:scale-[0.99] cursor-pointer"
+                    >
+                      {isSigningInGoogle ? (
+                        <RefreshCw className="w-4 h-4 animate-spin text-gray-700" />
+                      ) : (
+                        <GoogleIcon className="w-4 h-4" />
+                      )}
+                      <span>{isSigningInGoogle ? 'Opening Google Sign-In...' : 'Sign in with Google Account'}</span>
+                    </button>
+
+                    {/* 3-Step Setup Guide Trigger */}
+                    <div className="pt-1">
+                      <button
+                        onClick={() => setShowSetupGuide(!showSetupGuide)}
+                        className="text-[var(--accent-peach)] hover:underline text-[11px] font-mono flex items-center gap-1 cursor-pointer"
+                      >
+                        <HelpCircle className="w-3.5 h-3.5" />
+                        <span>{showSetupGuide ? 'Hide 3-Step Setup Guide' : 'How to get a free Google OAuth Client ID (1 minute guide)'}</span>
+                      </button>
+
+                      {showSetupGuide && (
+                        <div className="mt-2.5 p-3.5 rounded-xl bg-[var(--bg-ground)] border border-[var(--border-color)] space-y-2 text-[11px] leading-relaxed">
+                          <div className="font-bold text-[var(--accent-coral)] flex items-center gap-1 font-heading">
+                            <span>Step-by-Step Google OAuth Setup:</span>
+                          </div>
+                          <ol className="list-decimal list-inside space-y-1.5 text-[var(--text-secondary)]">
+                            <li>
+                              Open <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer" className="text-[var(--accent-peach)] underline">Google Cloud Credentials</a>.
+                            </li>
+                            <li>
+                              Click <strong>Create Credentials</strong> → <strong>OAuth client ID</strong>. Select <strong>Web application</strong>.
+                            </li>
+                            <li>
+                              Under <strong>Authorized JavaScript origins</strong>, add: <code className="bg-[var(--bg-surface)] px-1.5 py-0.5 rounded border border-[var(--border-color)] text-[var(--accent-coral)]">{window.location.origin}</code>
+                            </li>
+                            <li>
+                              Copy the generated <strong>Client ID</strong> and paste it into the field above, then click <strong>Sign in with Google Account</strong>.
+                            </li>
+                          </ol>
+                        </div>
+                      )}
+                    </div>
+
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    <p className="text-[var(--text-muted)] text-[11px]">
+                      Paste a Google OAuth access token directly (e.g. generated from <a href="https://developers.google.com/oauthplayground" target="_blank" rel="noreferrer" className="text-[var(--accent-peach)] underline">OAuth Playground</a> with Drive scope).
+                    </p>
+
+                    <div className="flex space-x-2">
+                      <div className="relative flex-1">
+                        <Key className="w-4 h-4 absolute left-3 top-2.5 text-[var(--text-muted)]" />
+                        <input
+                          type="password"
+                          placeholder="ya29.a0x..."
+                          value={driveToken}
+                          onChange={(e) => setDriveToken(e.target.value)}
+                          className="w-full bg-[var(--bg-ground)] border border-[var(--border-color)] rounded-xl pl-9 pr-3 py-2 text-xs text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--accent-coral)]"
+                        />
+                      </div>
+                      <button
+                        onClick={handleSaveDriveToken}
+                        disabled={isVerifyingDrive}
+                        className="px-4 py-2 rounded-xl bg-[var(--accent-coral)] text-[#1D1214] font-bold text-xs flex items-center space-x-1.5 transition shrink-0 cursor-pointer"
+                      >
+                        {isVerifyingDrive ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+                        <span>Verify Token</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+              </div>
+            )}
+
+          </div>
+
+          {/* Drive Sessions Upload List */}
+          <div className="p-5 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)] space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[var(--border-color)] pb-2">
+              <h4 className="font-bold text-[var(--text-primary)] flex items-center gap-2">
+                <Upload className="w-4 h-4 text-[var(--accent-coral)]" />
+                Upload Sessions to Google Drive ({sessions.length})
+              </h4>
+
+              {sessions.length > 0 && (
+                <button
+                  onClick={handleUploadMasterZipToDrive}
+                  disabled={!driveUser || isProcessing}
+                  className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-[var(--accent-coral)] to-[var(--accent-peach)] text-[#1D1214] font-bold text-[11px] flex items-center space-x-1.5 transition shrink-0 disabled:opacity-50"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Upload Master Archive Zip</span>
+                </button>
+              )}
+            </div>
+
+            {sessions.length === 0 ? (
+              <p className="text-[var(--text-muted)] text-[11px] py-2">
+                No encrypted sessions stored in local IndexedDB. Encrypt a lecture first.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {sessions.map((s) => (
+                  <div key={s.id} className="p-3.5 rounded-xl bg-[var(--bg-ground)] border border-[var(--border-color)] flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-bold text-[var(--text-primary)] truncate">{s.title}</div>
+                      <div className="text-[10px] text-[var(--text-muted)] font-mono mt-0.5">
+                        {s.segmentCount} segments • {(s.totalSizeBytes / 1024 / 1024).toFixed(2)} MB
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => handleUploadZipToDrive(s)}
+                      disabled={!driveUser || isProcessing}
+                      className="px-3 py-1.5 rounded-lg bg-[var(--accent-coral)] text-[#1D1214] font-bold text-[11px] flex items-center space-x-1 transition shrink-0 disabled:opacity-50"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>Upload Zip</span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Google Drive Stored Files */}
+          {driveUser && (
+            <div className="p-5 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)] space-y-3">
+              <div className="flex items-center justify-between border-b border-[var(--border-color)] pb-2">
+                <h4 className="font-bold text-[var(--text-primary)] flex items-center gap-2">
+                  <HardDrive className="w-4 h-4 text-[var(--accent-coral)]" />
+                  Google Drive "EduKatalyst Storage" Folder Files ({driveFiles.length})
+                </h4>
+                <button 
+                  onClick={() => handleTestDrive(driveToken)}
+                  className="text-[var(--accent-peach)] hover:underline text-[11px] font-mono flex items-center gap-1"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  <span>Refresh Drive</span>
+                </button>
+              </div>
+
+              {driveFiles.length === 0 ? (
+                <p className="text-[var(--text-muted)] text-[11px] py-2">
+                  No files uploaded to your Google Drive "EduKatalyst Storage" folder yet.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {driveFiles.map((file) => (
+                    <div key={file.id} className="p-3 rounded-xl bg-[var(--bg-ground)] border border-[var(--border-color)] flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="font-bold text-[var(--text-primary)] truncate">{file.name}</div>
+                        <div className="text-[10px] text-[var(--text-muted)] font-mono mt-0.5">
+                          Uploaded: {new Date(file.createdTime).toLocaleDateString()} • {file.size ? (file.size / 1024 / 1024).toFixed(2) + ' MB' : 'Archive'}
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => handleRestoreFromDrive(file.id, file.name)}
+                        disabled={isProcessing}
+                        className="px-3 py-1.5 rounded-lg bg-[var(--accent-coral)] text-[#1D1214] font-bold text-[11px] flex items-center space-x-1 transition shrink-0"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>Restore Zip</span>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+        </div>
+      )}
+
+      {/* ================= GITHUB GIST TAB ================= */}
       {activeTab === 'github' && (
         <div className="space-y-5">
           
@@ -379,13 +727,13 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
             <div className="flex items-center justify-between border-b border-[var(--border-color)] pb-3">
               <div className="flex items-center space-x-2">
                 <GithubIcon className="w-4 h-4 text-[var(--accent-coral)]" />
-                <h4 className="font-bold text-[var(--text-primary)]">GitHub Personal Access Token (PAT)</h4>
+                <h4 className="font-bold text-[var(--text-primary)]">GitHub Personal Access Token</h4>
               </div>
 
               {githubUser ? (
                 <div className="flex items-center space-x-2 bg-emerald-950/60 border border-emerald-500/30 text-emerald-300 px-2.5 py-1 rounded-full text-[11px] font-mono">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                  <span>Connected as @{githubUser.login}</span>
+                  <span>@{githubUser.login}</span>
                 </div>
               ) : (
                 <span className="text-[var(--text-muted)] text-[11px]">Not Connected</span>
@@ -393,17 +741,8 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
             </div>
 
             <div className="space-y-2">
-              <label className="text-[var(--text-primary)] font-semibold flex items-center justify-between">
-                <span>Personal Access Token (with `gist` scope)</span>
-                <a 
-                  href="https://github.com/settings/tokens/new?scopes=gist&description=EduKatalyst+Storage"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-[var(--accent-peach)] hover:underline flex items-center gap-1 font-mono text-[11px]"
-                >
-                  <span>Generate Token on GitHub</span>
-                  <ExternalLink className="w-3 h-3" />
-                </a>
+              <label className="text-[var(--text-primary)] font-semibold">
+                Personal Access Token (Scope: `gist`)
               </label>
 
               <div className="flex items-center space-x-2">
@@ -411,7 +750,7 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
                   <Key className="w-4 h-4 absolute left-3 top-3 text-[var(--text-muted)]" />
                   <input
                     type="password"
-                    placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                    placeholder="ghp_..."
                     value={githubToken}
                     onChange={(e) => setGithubToken(e.target.value)}
                     className="w-full bg-[var(--bg-ground)] border border-[var(--border-color)] rounded-xl pl-9 pr-4 py-2.5 text-[var(--text-primary)] font-mono placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-coral)]"
@@ -423,28 +762,27 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
                   className="px-4 py-2.5 rounded-xl bg-[var(--accent-coral)] text-[#1D1214] font-bold flex items-center space-x-1.5 transition shrink-0"
                 >
                   {isVerifyingGithub ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
-                  <span>Verify & Save</span>
+                  <span>Verify GitHub Token</span>
                 </button>
               </div>
-              <p className="text-[11px] text-[var(--text-muted)]">
-                Your token is stored safely in your browser local storage and is only transmitted directly to GitHub's HTTPS endpoint.
-              </p>
             </div>
           </div>
 
-          {/* GitHub Actions Card */}
+          {/* GitHub Actions */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             
-            {/* Push / Sync Gists */}
-            <div className="p-5 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)] space-y-3">
-              <div className="flex items-center space-x-2 text-[var(--text-primary)] font-bold">
-                <Upload className="w-4 h-4 text-[var(--accent-coral)]" />
-                <span>Export Sessions to GitHub Gist</span>
+            {/* Push / Export to Gist */}
+            <div className="p-5 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)] space-y-3 flex flex-col justify-between">
+              <div className="space-y-1">
+                <div className="flex items-center space-x-2 text-[var(--text-primary)] font-bold">
+                  <Upload className="w-4 h-4 text-[var(--accent-coral)]" />
+                  <span>Export Full Library Metadata</span>
+                </div>
+                <p className="text-[var(--text-muted)] text-[11px] leading-relaxed">
+                  Backup session manifest, encryption key hashes, and taxonomy structure as a private GitHub Gist.
+                </p>
               </div>
-              <p className="text-[var(--text-muted)] text-[11px]">
-                Create a private GitHub Gist containing full metadata and encryption key references for all {sessions.length} sessions.
-              </p>
-              
+
               <button
                 onClick={() => handlePushGistBackup()}
                 disabled={!githubUser || isProcessing}
@@ -535,158 +873,6 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
                           <ExternalLink className="w-3.5 h-3.5" />
                         </a>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-        </div>
-      )}
-
-      {/* ================= GOOGLE DRIVE TAB ================= */}
-      {activeTab === 'gdrive' && (
-        <div className="space-y-5">
-          
-          {/* Drive Token Config Card */}
-          <div className="p-5 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)] space-y-4">
-            <div className="flex items-center justify-between border-b border-[var(--border-color)] pb-3">
-              <div className="flex items-center space-x-2">
-                <HardDrive className="w-4 h-4 text-[var(--accent-coral)]" />
-                <h4 className="font-bold text-[var(--text-primary)]">Google Drive OAuth Access Token</h4>
-              </div>
-
-              {driveUser ? (
-                <div className="flex items-center space-x-2 bg-emerald-950/60 border border-emerald-500/30 text-emerald-300 px-2.5 py-1 rounded-full text-[11px] font-mono">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                  <span>{driveUser.email || 'Drive Authorized'}</span>
-                </div>
-              ) : (
-                <span className="text-[var(--text-muted)] text-[11px]">Not Connected</span>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-[var(--text-primary)] font-semibold">
-                OAuth Access Token (Drive Scope: `https://www.googleapis.com/auth/drive.file`)
-              </label>
-
-              <div className="flex items-center space-x-2">
-                <div className="relative flex-1">
-                  <Key className="w-4 h-4 absolute left-3 top-3 text-[var(--text-muted)]" />
-                  <input
-                    type="password"
-                    placeholder="ya29.a0x..."
-                    value={driveToken}
-                    onChange={(e) => setDriveToken(e.target.value)}
-                    className="w-full bg-[var(--bg-ground)] border border-[var(--border-color)] rounded-xl pl-9 pr-4 py-2.5 text-[var(--text-primary)] font-mono placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-coral)]"
-                  />
-                </div>
-                <button
-                  onClick={handleSaveDriveToken}
-                  disabled={isVerifyingDrive}
-                  className="px-4 py-2.5 rounded-xl bg-[var(--accent-coral)] text-[#1D1214] font-bold flex items-center space-x-1.5 transition shrink-0"
-                >
-                  {isVerifyingDrive ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
-                  <span>Verify Drive Token</span>
-                </button>
-              </div>
-              <p className="text-[11px] text-[var(--text-muted)]">
-                Backups are stored automatically in a dedicated <strong className="text-[var(--text-primary)]">"EduKatalyst Storage"</strong> folder inside your Google Drive.
-              </p>
-            </div>
-          </div>
-
-          {/* Drive Sessions Upload List */}
-          <div className="p-5 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)] space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[var(--border-color)] pb-2">
-              <h4 className="font-bold text-[var(--text-primary)] flex items-center gap-2">
-                <Upload className="w-4 h-4 text-[var(--accent-coral)]" />
-                Upload Sessions to Google Drive ({sessions.length})
-              </h4>
-
-              {sessions.length > 0 && (
-                <button
-                  onClick={handleUploadMasterZipToDrive}
-                  disabled={!driveUser || isProcessing}
-                  className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-[var(--accent-coral)] to-[var(--accent-peach)] text-[#1D1214] font-bold text-[11px] flex items-center space-x-1.5 transition shrink-0"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Upload Master Archive Zip</span>
-                </button>
-              )}
-            </div>
-
-            {sessions.length === 0 ? (
-              <p className="text-[var(--text-muted)] text-[11px] py-2">
-                No encrypted sessions stored in local IndexedDB. Encrypt a lecture first.
-              </p>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {sessions.map((s) => (
-                  <div key={s.id} className="p-3.5 rounded-xl bg-[var(--bg-ground)] border border-[var(--border-color)] flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="font-bold text-[var(--text-primary)] truncate">{s.title}</div>
-                      <div className="text-[10px] text-[var(--text-muted)] font-mono mt-0.5">
-                        {s.segmentCount} segments • {(s.totalSizeBytes / 1024 / 1024).toFixed(2)} MB
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() => handleUploadZipToDrive(s)}
-                      disabled={!driveUser || isProcessing}
-                      className="px-3 py-1.5 rounded-lg bg-[var(--accent-coral)] text-[#1D1214] font-bold text-[11px] flex items-center space-x-1 transition shrink-0"
-                    >
-                      <Upload className="w-3.5 h-3.5" />
-                      <span>Upload Zip</span>
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Google Drive Stored Files */}
-          {driveUser && (
-            <div className="p-5 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)] space-y-3">
-              <div className="flex items-center justify-between border-b border-[var(--border-color)] pb-2">
-                <h4 className="font-bold text-[var(--text-primary)] flex items-center gap-2">
-                  <HardDrive className="w-4 h-4 text-[var(--accent-coral)]" />
-                  Google Drive "EduKatalyst Storage" Folder Files ({driveFiles.length})
-                </h4>
-                <button 
-                  onClick={() => handleTestDrive(driveToken)}
-                  className="text-[var(--accent-peach)] hover:underline text-[11px] font-mono flex items-center gap-1"
-                >
-                  <RefreshCw className="w-3 h-3" />
-                  <span>Refresh Drive</span>
-                </button>
-              </div>
-
-              {driveFiles.length === 0 ? (
-                <p className="text-[var(--text-muted)] text-[11px] py-2">
-                  No files uploaded to your Google Drive "EduKatalyst Storage" folder yet.
-                </p>
-              ) : (
-                <div className="space-y-2">
-                  {driveFiles.map((file) => (
-                    <div key={file.id} className="p-3 rounded-xl bg-[var(--bg-ground)] border border-[var(--border-color)] flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="font-bold text-[var(--text-primary)] truncate">{file.name}</div>
-                        <div className="text-[10px] text-[var(--text-muted)] font-mono mt-0.5">
-                          Uploaded: {new Date(file.createdTime).toLocaleDateString()} • {file.size ? (file.size / 1024 / 1024).toFixed(2) + ' MB' : 'Archive'}
-                        </div>
-                      </div>
-
-                      <button
-                        onClick={() => handleRestoreFromDrive(file.id, file.name)}
-                        disabled={isProcessing}
-                        className="px-3 py-1.5 rounded-lg bg-[var(--accent-coral)] text-[#1D1214] font-bold text-[11px] flex items-center space-x-1 transition shrink-0"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        <span>Restore Zip</span>
-                      </button>
                     </div>
                   ))}
                 </div>
