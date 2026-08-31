@@ -30,4 +30,4 @@ EduKatalyst is provided on an "AS IS" and "AS AVAILABLE" basis without warrantie
 ## 5. Contact Information
 For support or inquiries regarding these Terms:
 - **Repository:** [https://github.com/denzven/EduKatalyst](https://github.com/denzven/EduKatalyst)
-- **Email:** edukatalyst.dzvn@gmail.com
+- **Email:** edukatalyst.dzvn+queries@gmail.com

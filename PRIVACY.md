@@ -29,4 +29,4 @@ When you choose to use Cloud Sync features (Google Drive Sync or GitHub Gist Syn
 ## 4. Contact & Support
 If you have any questions regarding this Privacy Policy, please open an issue on our official GitHub repository:
 - **Repository:** [https://github.com/denzven/EduKatalyst](https://github.com/denzven/EduKatalyst)
-- **Email:** edukatalyst.dzvn@gmail.com
+- **Email:** edukatalyst.dzvn+queries@gmail.com

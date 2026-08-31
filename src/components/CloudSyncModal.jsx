@@ -373,7 +373,18 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
 
   const handleRunDriveIntegrationTest = async () => {
     let tokenToUse = driveToken || getStoredDriveToken();
-    if (!tokenToUse) {
+    let isValid = false;
+
+    if (tokenToUse) {
+      try {
+        await validateDriveToken(tokenToUse);
+        isValid = true;
+      } catch {
+        isValid = false;
+      }
+    }
+
+    if (!isValid) {
       try {
         setStatusMsg({ type: 'info', text: 'Opening Google Sign-In window for test authentication...' });
         tokenToUse = await promptGoogleDriveSignIn();
@@ -416,7 +427,33 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
         });
       }
     } catch (err) {
-      setStatusMsg({ type: 'error', text: `🧪 Integration Test Error: ${err.message}` });
+      const errMsg = err.message || '';
+      if (errMsg.includes('Google Drive API is disabled') || errMsg.includes('has not been used in project')) {
+        setStatusMsg({ 
+          type: 'error', 
+          text: 'Google Drive API is disabled in your Google Cloud Console project. Enable it at the link below in 1 click.',
+          link: 'https://console.cloud.google.com/apis/library/drive.googleapis.com',
+          linkText: 'Enable Google Drive API'
+        });
+      } else if (errMsg.includes('403') || errMsg.includes('access_denied')) {
+        setStatusMsg({ 
+          type: 'error', 
+          text: 'Google OAuth Error 403 (access_denied): Your app is in Testing status. Add your email to "Test users" in Google Cloud OAuth Consent Screen.',
+          link: 'https://console.cloud.google.com/apis/credentials/consent',
+          linkText: 'Open OAuth Consent Screen'
+        });
+        setShowSetupGuide(true);
+      } else if (errMsg.includes('400') || errMsg.includes('origin_mismatch')) {
+        setStatusMsg({ 
+          type: 'error', 
+          text: `Google OAuth Error 400 (origin_mismatch): Add "${window.location.origin}" to Authorized JavaScript origins in Google Cloud Console.`,
+          link: 'https://console.cloud.google.com/apis/credentials',
+          linkText: 'Fix in Google Cloud Console'
+        });
+        setShowSetupGuide(true);
+      } else {
+        setStatusMsg({ type: 'error', text: `🧪 Integration Test Error: ${errMsg}` });
+      }
     } finally {
       setIsProcessing(false);
     }

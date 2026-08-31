@@ -50,7 +50,7 @@ export default function LegalPage({ mode = 'privacy' }) {
 
             <h3 className="font-bold text-sm text-[var(--text-primary)] font-heading">4. Contact</h3>
             <p>
-              For inquiries regarding privacy, email us at <a href="mailto:edukatalyst.dzvn@gmail.com" className="text-[var(--accent-peach)] underline font-mono">edukatalyst.dzvn@gmail.com</a>.
+              For inquiries regarding privacy, email us at <a href="mailto:edukatalyst.dzvn+queries@gmail.com" className="text-[var(--accent-peach)] underline font-mono">edukatalyst.dzvn+queries@gmail.com</a>.
             </p>
           </div>
         </div>
@@ -93,7 +93,7 @@ export default function LegalPage({ mode = 'privacy' }) {
 
             <h3 className="font-bold text-sm text-[var(--text-primary)] font-heading">5. Contact Information</h3>
             <p>
-              For questions regarding these Terms, contact <a href="mailto:edukatalyst.dzvn@gmail.com" className="text-[var(--accent-peach)] underline font-mono">edukatalyst.dzvn@gmail.com</a>.
+              For questions regarding these Terms, contact <a href="mailto:edukatalyst.dzvn+queries@gmail.com" className="text-[var(--accent-peach)] underline font-mono">edukatalyst.dzvn+queries@gmail.com</a>.
             </p>
           </div>
         </div>

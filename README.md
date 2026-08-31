@@ -124,8 +124,8 @@ d:/DZVN_edutech_test/
 
 1. **Clone the Repository:**
    ```bash
-   git clone https://github.com/dzvn/edukatalyst.git
-   cd edukatalyst
+   git clone https://github.com/denzven/EduKatalyst.git
+   cd EduKatalyst
    ```
 
 2. **Install Dependencies:**
@@ -153,7 +153,10 @@ d:/DZVN_edutech_test/
 
 ---
 
-## 📄 License & Attribution
+## 📄 License & Contact
 
 Built with ❤️ by **DZVN Tech**.  
 *Katalyze the Change • By students. For students.*
+
+- **Official Repository:** [https://github.com/denzven/EduKatalyst](https://github.com/denzven/EduKatalyst)
+- **Support & Queries:** [edukatalyst.dzvn+queries@gmail.com](mailto:edukatalyst.dzvn+queries@gmail.com)
