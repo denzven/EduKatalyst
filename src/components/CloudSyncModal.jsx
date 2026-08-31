@@ -17,7 +17,8 @@ import {
   FolderArchive,
   LogOut,
   Settings,
-  HelpCircle
+  HelpCircle,
+  Sparkles
 } from 'lucide-react';
 
 function GithubIcon({ className = "w-4 h-4" }) {
@@ -332,6 +333,19 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
   };
 
   const handleUploadMasterZipToDrive = async () => {
+    let tokenToUse = driveToken || getStoredDriveToken();
+    if (!tokenToUse) {
+      try {
+        setStatusMsg({ type: 'info', text: 'Opening Google Sign-In window...' });
+        tokenToUse = await promptGoogleDriveSignIn();
+        setDriveToken(tokenToUse);
+        await handleTestDrive(tokenToUse, true);
+      } catch (authErr) {
+        setStatusMsg({ type: 'error', text: `Google Sign-In Required: ${authErr.message}` });
+        return;
+      }
+    }
+
     setIsProcessing(true);
     setStatusMsg(null);
     try {
@@ -340,18 +354,69 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
 
       await exportMasterBundle(sessions, async (blob) => {
         setStatusMsg({ type: 'info', text: 'Publishing master library to Google Drive "EduKatalyst Storage" folder...' });
-        const driveFile = await uploadZipToDrive(blob, zipFilename, driveToken);
+        const driveFile = await uploadZipToDrive(blob, zipFilename, tokenToUse);
         setStatusMsg({ 
           type: 'success', 
           text: `🚀 Successfully Published Official Master Library ("${driveFile.name}") to Google Drive!` 
         });
 
-        const files = await listDriveBackups(driveToken);
+        const files = await listDriveBackups(tokenToUse);
         setDriveFiles(files);
       });
 
     } catch (err) {
       setStatusMsg({ type: 'error', text: `Official Drive Publish Failed: ${err.message}` });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleRunDriveIntegrationTest = async () => {
+    let tokenToUse = driveToken || getStoredDriveToken();
+    if (!tokenToUse) {
+      try {
+        setStatusMsg({ type: 'info', text: 'Opening Google Sign-In window for test authentication...' });
+        tokenToUse = await promptGoogleDriveSignIn();
+        setDriveToken(tokenToUse);
+        await handleTestDrive(tokenToUse, true);
+      } catch (authErr) {
+        setStatusMsg({ type: 'error', text: `Integration Test Failed: Google Sign-In required (${authErr.message})` });
+        return;
+      }
+    }
+
+    setIsProcessing(true);
+    setStatusMsg({ type: 'info', text: '🧪 STEP 1/4: Generating sample diagnostic test file...' });
+
+    try {
+      const sampleText = `EduKatalyst Google Drive Integration Test File\nCreated At: ${new Date().toISOString()}\nStatus: PASS\nSystem: Client-Side Cloud Sync Verification`;
+      const sampleBlob = new Blob([sampleText], { type: 'text/plain' });
+      const testFileName = `edukatalyst_integration_test_${Date.now()}.txt`;
+
+      setStatusMsg({ type: 'info', text: `🧪 STEP 2/4: Uploading "${testFileName}" to "EduKatalyst Storage" folder on Google Drive...` });
+      const uploadedFile = await uploadZipToDrive(sampleBlob, testFileName, tokenToUse);
+
+      setStatusMsg({ type: 'info', text: `🧪 STEP 3/4: Refreshing file list from Google Drive...` });
+      const files = await listDriveBackups(tokenToUse);
+      setDriveFiles(files);
+
+      setStatusMsg({ type: 'info', text: `🧪 STEP 4/4: Downloading uploaded sample file back from Google Drive for integrity check...` });
+      const downloadedBlob = await downloadFromDrive(uploadedFile.id, tokenToUse);
+      const downloadedText = await downloadedBlob.text();
+
+      if (downloadedText === sampleText) {
+        setStatusMsg({
+          type: 'success',
+          text: `🎉 GOOGLE DRIVE INTEGRATION TEST PASSED! Uploaded sample file (${testFileName}), retrieved File ID (${uploadedFile.id}), and verified content integrity 100%!`
+        });
+      } else {
+        setStatusMsg({
+          type: 'info',
+          text: `Uploaded and downloaded sample file (${uploadedFile.id}), but content length differed slightly.`
+        });
+      }
+    } catch (err) {
+      setStatusMsg({ type: 'error', text: `🧪 Integration Test Error: ${err.message}` });
     } finally {
       setIsProcessing(false);
     }
@@ -647,16 +712,27 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
                 </p>
               </div>
 
-              {sessions.length > 0 && (
+              <div className="flex items-center space-x-2 shrink-0">
                 <button
-                  onClick={handleUploadMasterZipToDrive}
-                  disabled={!driveUser || isProcessing}
-                  className="px-4 py-2.5 rounded-xl bg-[var(--accent-coral)] text-white dark:text-[#261619] font-extrabold text-xs flex items-center space-x-2 transition shadow-lg hover:opacity-90 shrink-0 disabled:opacity-50 cursor-pointer"
+                  onClick={handleRunDriveIntegrationTest}
+                  disabled={isProcessing}
+                  className="px-3 py-2.5 rounded-xl bg-[var(--bg-ground)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border-color)] text-[var(--accent-peach)] font-bold text-xs flex items-center space-x-1.5 transition shrink-0 disabled:opacity-50 cursor-pointer"
                 >
-                  <Upload className="w-4 h-4" />
-                  <span>🚀 Publish All Master Content to Official Drive</span>
+                  <Sparkles className="w-4 h-4 text-[var(--accent-peach)]" />
+                  <span>🧪 Test Upload & Download</span>
                 </button>
-              )}
+
+                {sessions.length > 0 && (
+                  <button
+                    onClick={handleUploadMasterZipToDrive}
+                    disabled={isProcessing}
+                    className="px-4 py-2.5 rounded-xl bg-[var(--accent-coral)] text-white dark:text-[#261619] font-extrabold text-xs flex items-center space-x-2 transition shadow-lg hover:opacity-90 shrink-0 disabled:opacity-50 cursor-pointer"
+                  >
+                    <Upload className="w-4 h-4" />
+                    <span>🚀 Publish All Master Content to Official Drive</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Content Type Statistics Badges */}

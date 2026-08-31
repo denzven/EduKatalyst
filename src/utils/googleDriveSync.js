@@ -1,9 +1,10 @@
 /**
  * Google Drive Integration Utility
- * Handles Google Drive API v3 and Google OAuth 2.0 Sign-In for client-side cloud backup & sync.
+ * Handles Google Drive API v3, Public Drive Folder fetching, and Google OAuth 2.0.
  */
 
 const DRIVE_TOKEN_KEY = 'katalyst_drive_access_token';
+const PUBLIC_FOLDER_KEY = 'katalyst_public_drive_folder_id';
 const CLIENT_ID_KEY = 'katalyst_google_client_id';
 const FOLDER_NAME = 'EduKatalyst Storage';
 
@@ -11,7 +12,7 @@ const FOLDER_NAME = 'EduKatalyst Storage';
 const DEFAULT_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '119791404749-o4a3g19ps1sjvkgmcf9qj62ih9l5mcpp.apps.googleusercontent.com';
 
 /**
- * Retrieve stored Google OAuth Access Token
+ * Retrieve stored Google OAuth Access Token (or Master Token Fallback)
  */
 export function getStoredDriveToken() {
   const userToken = localStorage.getItem(DRIVE_TOKEN_KEY);
@@ -29,6 +30,24 @@ export function setStoredDriveToken(token) {
     localStorage.setItem(DRIVE_TOKEN_KEY, token.trim());
   } else {
     localStorage.removeItem(DRIVE_TOKEN_KEY);
+  }
+}
+
+/**
+ * Retrieve stored Public Master Google Drive Folder ID
+ */
+export function getStoredPublicFolderId() {
+  return localStorage.getItem(PUBLIC_FOLDER_KEY) || import.meta.env.VITE_MASTER_GOOGLE_FOLDER_ID || '';
+}
+
+/**
+ * Save Public Master Google Drive Folder ID
+ */
+export function setStoredPublicFolderId(folderId) {
+  if (folderId) {
+    localStorage.setItem(PUBLIC_FOLDER_KEY, folderId.trim());
+  } else {
+    localStorage.removeItem(PUBLIC_FOLDER_KEY);
   }
 }
 
@@ -55,6 +74,27 @@ export function setStoredClientId(clientId) {
 }
 
 /**
+ * Build direct public download URL for any Google Drive file (NO SIGN-IN REQUIRED)
+ */
+export function getPublicDriveFileUrl(fileId) {
+  return `https://drive.google.com/uc?export=download&id=${encodeURIComponent(fileId)}`;
+}
+
+/**
+ * Fetch public file content from Google Drive without any authentication (NO SIGN-IN REQUIRED)
+ */
+export async function fetchPublicDriveFile(fileId, responseType = 'text') {
+  const url = getPublicDriveFileUrl(fileId);
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch public Google Drive file (HTTP ${response.status})`);
+  }
+  if (responseType === 'blob') return await response.blob();
+  if (responseType === 'json') return await response.json();
+  return await response.text();
+}
+
+/**
  * Validate current Google Drive Access Token and retrieve account email
  */
 export async function validateDriveToken(accessToken) {
@@ -71,7 +111,6 @@ export async function validateDriveToken(accessToken) {
 
   const data = await response.json();
   
-  // Also fetch user profile email if available
   let email = data.email || '';
   if (!email) {
     try {
@@ -330,15 +369,23 @@ export async function listDriveBackups(token) {
  */
 export async function downloadFromDrive(fileId, token) {
   const accessToken = token || getStoredDriveToken();
-  if (!accessToken) throw new Error('Google Drive token required.');
+  if (!accessToken) {
+    // Fall back to public unauthenticated download if no token provided!
+    return await fetchPublicDriveFile(fileId, 'blob');
+  }
 
   const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
 
   if (!response.ok) {
-    const errData = await response.json().catch(() => ({}));
-    throw new Error(`Failed to download file from Google Drive: ${errData.error?.message || response.statusText}`);
+    // If authenticated download fails or token restricted, attempt public download fallback
+    try {
+      return await fetchPublicDriveFile(fileId, 'blob');
+    } catch {
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(`Failed to download file from Google Drive: ${errData.error?.message || response.statusText}`);
+    }
   }
 
   return await response.blob();
