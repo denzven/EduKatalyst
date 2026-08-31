@@ -39,6 +39,7 @@ export async function saveVideoSession(sessionData) {
       category: sessionData.category || 'General',
       tags: Array.isArray(sessionData.tags) ? sessionData.tags : [],
       description: sessionData.description || '',
+      thumbnailUrl: sessionData.thumbnailUrl || null,
       createdAt: sessionData.createdAt || new Date().toISOString(),
       keyHex: sessionData.keyHex,
       keyBlob: sessionData.keyBlob,

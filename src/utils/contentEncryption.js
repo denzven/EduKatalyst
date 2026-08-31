@@ -17,6 +17,19 @@ async function getSessionKey() {
   return sessionCryptoKey;
 }
 
+function uint8ArrayToBase64(uint8) {
+  let binary = '';
+  const len = uint8.byteLength;
+  const CHUNK_SIZE = 0x8000; // 32KB chunks to prevent function argument stack overflow
+  for (let i = 0; i < len; i += CHUNK_SIZE) {
+    binary += String.fromCharCode.apply(
+      null,
+      uint8.subarray(i, i + CHUNK_SIZE)
+    );
+  }
+  return btoa(binary);
+}
+
 /**
  * Encrypt plain text using AES-128 GCM
  */
@@ -33,7 +46,7 @@ export async function encryptTextPayload(plainText) {
 
   return {
     ivHex: Array.from(iv).map(b => b.toString(16).padStart(2, '0')).join(''),
-    ciphertextBase64: btoa(String.fromCharCode(...new Uint8Array(ciphertext)))
+    ciphertextBase64: uint8ArrayToBase64(new Uint8Array(ciphertext))
   };
 }
 

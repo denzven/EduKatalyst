@@ -315,6 +315,27 @@ export default function VideoUploader({ onSessionCreated, onSelectSessionForPlay
       setResultSession(sessionRecord);
       onSessionCreated?.(sessionRecord);
 
+      // Auto-upload to Google Drive Cloud Storage if Google Drive is authorized
+      const driveToken = getStoredDriveToken();
+      if (driveToken) {
+        appendLog('Auto-uploading video package to Google Drive Cloud Storage ("EduKatalyst Storage")...');
+        setIsPublishingDrive(true);
+        setDrivePublishStatus('Auto-uploading to Google Drive Cloud Storage...');
+        try {
+          const zipFilename = `${sessionRecord.title.replace(/[^a-z0-9]/gi, '_')}_hls_bundle.zip`;
+          await exportSessionToZip(sessionRecord, async (blob) => {
+            await uploadZipToDrive(blob, zipFilename, driveToken);
+            setDrivePublishStatus(`Auto-published "${sessionRecord.title}" to Google Drive Cloud Storage!`);
+            appendLog('Successfully uploaded video package to Google Drive Cloud Storage!');
+          });
+        } catch (driveErr) {
+          appendLog(`Google Drive Auto-Upload Warning: ${driveErr.message}`);
+          setDrivePublishStatus(`Cloud Storage Notice: ${driveErr.message}`);
+        } finally {
+          setIsPublishingDrive(false);
+        }
+      }
+
     } catch (err) {
       console.error(err);
       setError(`Pipeline error: ${err.message || err}`);
