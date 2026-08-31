@@ -21,6 +21,7 @@ import { encryptAndChunkVideo, validateVideoFile } from '../utils/ffmpegHelper';
 import { saveVideoSession } from '../utils/storage';
 import { exportSessionToZip, importSessionFromZip } from '../utils/zipHelper';
 import { aggregateAllSubjects, registerSubject } from '../utils/taxonomyController';
+import { getStoredDriveToken, uploadZipToDrive } from '../utils/googleDriveSync';
 
 export default function VideoUploader({ onSessionCreated, onSelectSessionForPlayer }) {
   const [selectedFile, setSelectedFile] = useState(null);
@@ -39,6 +40,31 @@ export default function VideoUploader({ onSessionCreated, onSelectSessionForPlay
   const [error, setError] = useState(null);
   const [isGeneratingDemo, setIsGeneratingDemo] = useState(false);
   const [isExportingZip, setIsExportingZip] = useState(false);
+  const [isPublishingDrive, setIsPublishingDrive] = useState(false);
+  const [drivePublishStatus, setDrivePublishStatus] = useState(null);
+
+  const handlePublishToDrive = async () => {
+    if (!resultSession) return;
+    const token = getStoredDriveToken();
+    if (!token) {
+      alert('Google Drive authorization required. Please sign in with Google in Cloud Sync tab first.');
+      return;
+    }
+
+    setIsPublishingDrive(true);
+    setDrivePublishStatus('Uploading to Google Drive...');
+    try {
+      const zipFilename = `${resultSession.title.replace(/[^a-z0-9]/gi, '_')}_hls_bundle.zip`;
+      await exportSessionToZip(resultSession, async (blob) => {
+        await uploadZipToDrive(blob, zipFilename, token);
+        setDrivePublishStatus(`Published "${resultSession.title}" to Google Drive successfully!`);
+      });
+    } catch (err) {
+      setDrivePublishStatus(`Publish failed: ${err.message}`);
+    } finally {
+      setIsPublishingDrive(false);
+    }
+  };
 
   const fileInputRef = useRef(null);
   const zipInputRef = useRef(null);
@@ -541,37 +567,54 @@ export default function VideoUploader({ onSessionCreated, onSelectSessionForPlay
 
           {/* Success Banner */}
           {resultSession && (
-            <div className="p-4 rounded-2xl bg-emerald-950/40 border border-emerald-500/30 text-emerald-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center space-x-2">
-                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
-                <div>
-                  <span className="font-bold text-white block font-heading">
-                    Video Encrypted Successfully ({resultSession.segmentCount} chunks)
-                  </span>
-                  <span className="text-[11px] text-[var(--accent-peach)] font-mono">
-                    Subject: {resultSession.category} | Tags: {resultSession.tags?.join(', ') || 'None'}
-                  </span>
+            <div className="space-y-2">
+              <div className="p-4 rounded-2xl bg-emerald-950/40 border border-emerald-500/30 text-emerald-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center space-x-2">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                  <div>
+                    <span className="font-bold text-white block font-heading">
+                      Video Encrypted Successfully ({resultSession.segmentCount} chunks)
+                    </span>
+                    <span className="text-[11px] text-[var(--accent-peach)] font-mono">
+                      Subject: {resultSession.category} | Tags: {resultSession.tags?.join(', ') || 'None'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-2 shrink-0">
+                  <button
+                    onClick={handlePublishToDrive}
+                    disabled={isPublishingDrive}
+                    className="flex items-center space-x-1 px-3 py-1.5 rounded-lg bg-[var(--accent-coral)]/20 hover:bg-[var(--accent-coral)]/30 border border-[var(--accent-coral)]/40 text-[var(--accent-coral)] font-bold transition"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>{isPublishingDrive ? 'Publishing...' : 'Publish to Drive'}</span>
+                  </button>
+
+                  <button
+                    onClick={handleExportResultZip}
+                    disabled={isExportingZip}
+                    className="flex items-center space-x-1 px-3 py-1.5 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border-color)] text-[var(--accent-peach)] font-semibold transition"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download Zip</span>
+                  </button>
+
+                  <button
+                    onClick={() => onSelectSessionForPlayer?.(resultSession.id)}
+                    className="flex items-center space-x-1 px-3 py-1.5 rounded-lg bg-[var(--accent-coral)] text-[#1D1214] font-bold transition"
+                  >
+                    <Play className="w-3.5 h-3.5 fill-current" />
+                    <span>Play</span>
+                  </button>
                 </div>
               </div>
 
-              <div className="flex items-center space-x-2 shrink-0">
-                <button
-                  onClick={handleExportResultZip}
-                  disabled={isExportingZip}
-                  className="flex items-center space-x-1 px-3 py-1.5 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border-color)] text-[var(--accent-peach)] font-semibold transition"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Download Zip</span>
-                </button>
-
-                <button
-                  onClick={() => onSelectSessionForPlayer?.(resultSession.id)}
-                  className="flex items-center space-x-1 px-3 py-1.5 rounded-lg bg-[var(--accent-coral)] text-[#1D1214] font-bold transition"
-                >
-                  <Play className="w-3.5 h-3.5 fill-current" />
-                  <span>Play</span>
-                </button>
-              </div>
+              {drivePublishStatus && (
+                <div className="p-2.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-color)] text-[11px] font-mono text-[var(--text-secondary)]">
+                  {drivePublishStatus}
+                </div>
+              )}
             </div>
           )}
 

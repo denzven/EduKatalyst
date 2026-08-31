@@ -14,7 +14,11 @@ const DEFAULT_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '119791404749
  * Retrieve stored Google OAuth Access Token
  */
 export function getStoredDriveToken() {
-  return localStorage.getItem(DRIVE_TOKEN_KEY) || '';
+  const userToken = localStorage.getItem(DRIVE_TOKEN_KEY);
+  if (userToken) return userToken;
+
+  // Fallback to central Master Platform Google Account token if set in .env
+  return import.meta.env.VITE_MASTER_GOOGLE_DRIVE_TOKEN || '';
 }
 
 /**
