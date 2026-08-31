@@ -1,35 +1,102 @@
 /**
  * Google Drive Integration Utility
- * Handles Google Drive API v3, Public Drive Folder fetching, and Google OAuth 2.0.
+ * Handles Google Drive API v3, Public Drive Folder fetching, Automatic Refresh Tokens, and Direct OAuth 2.0.
  */
 
 const DRIVE_TOKEN_KEY = 'katalyst_drive_access_token';
+const REFRESH_TOKEN_KEY = 'katalyst_drive_refresh_token';
 const PUBLIC_FOLDER_KEY = 'katalyst_public_drive_folder_id';
 const CLIENT_ID_KEY = 'katalyst_google_client_id';
 const FOLDER_NAME = 'EduKatalyst Storage';
 
-// Default Client ID loaded securely from environment variables (.env)
+// Master Google Drive OAuth Credentials loaded securely from environment variables (.env / .env.local)
+const DEFAULT_MASTER_TOKEN = import.meta.env.VITE_MASTER_GOOGLE_DRIVE_TOKEN || '';
+const DEFAULT_MASTER_REFRESH_TOKEN = import.meta.env.VITE_MASTER_GOOGLE_REFRESH_TOKEN || '';
 const DEFAULT_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '119791404749-o4a3g19ps1sjvkgmcf9qj62ih9l5mcpp.apps.googleusercontent.com';
+
+/**
+ * Automatically detect & extract Google OAuth Access Token from URL hash (#access_token=...) on app boot
+ */
+export function checkAndExtractOAuthHashToken() {
+  if (typeof window === 'undefined') return null;
+  const hash = window.location.hash || '';
+  if (hash.includes('access_token=')) {
+    try {
+      const hashContent = hash.substring(hash.indexOf('access_token='));
+      const params = new URLSearchParams(hashContent);
+      const token = params.get('access_token');
+      if (token) {
+        setStoredDriveToken(token);
+        // Clean URL back to standard app route
+        window.history.replaceState(null, '', window.location.pathname + '#/studio');
+        return token;
+      }
+    } catch {
+      // Ignore hash parse errors
+    }
+  }
+  return null;
+}
 
 /**
  * Retrieve stored Google OAuth Access Token (or Master Token Fallback)
  */
 export function getStoredDriveToken() {
+  // Check hash first on app load
+  const hashToken = checkAndExtractOAuthHashToken();
+  if (hashToken) return hashToken;
+
   const userToken = localStorage.getItem(DRIVE_TOKEN_KEY);
   if (userToken) return userToken;
 
-  // Fallback to central Master Platform Google Account token if set in .env
-  return import.meta.env.VITE_MASTER_GOOGLE_DRIVE_TOKEN || '';
+  // Fallback to central Master Platform Google Account token
+  return import.meta.env.VITE_MASTER_GOOGLE_DRIVE_TOKEN || DEFAULT_MASTER_TOKEN;
 }
 
 /**
- * Save or clear Google OAuth Access Token
+ * Save or clear Google OAuth Access Token (Supports raw tokens or full Google JSON payloads)
  */
-export function setStoredDriveToken(token) {
-  if (token) {
-    localStorage.setItem(DRIVE_TOKEN_KEY, token.trim());
-  } else {
+export function setStoredDriveToken(tokenOrJson) {
+  if (!tokenOrJson) {
     localStorage.removeItem(DRIVE_TOKEN_KEY);
+    return;
+  }
+
+  let tokenStr = String(tokenOrJson).trim();
+
+  // Handle full pasted JSON response from Google OAuth Playground
+  if (tokenStr.startsWith('{') && tokenStr.includes('access_token')) {
+    try {
+      const parsed = JSON.parse(tokenStr);
+      if (parsed.access_token) {
+        tokenStr = parsed.access_token.trim();
+      }
+      if (parsed.refresh_token) {
+        setStoredRefreshToken(parsed.refresh_token);
+      }
+    } catch {
+      // Ignore JSON parse failure
+    }
+  }
+
+  localStorage.setItem(DRIVE_TOKEN_KEY, tokenStr);
+}
+
+/**
+ * Retrieve stored Google Refresh Token
+ */
+export function getStoredRefreshToken() {
+  return localStorage.getItem(REFRESH_TOKEN_KEY) || import.meta.env.VITE_MASTER_GOOGLE_REFRESH_TOKEN || DEFAULT_MASTER_REFRESH_TOKEN;
+}
+
+/**
+ * Save or clear Google Refresh Token
+ */
+export function setStoredRefreshToken(token) {
+  if (token) {
+    localStorage.setItem(REFRESH_TOKEN_KEY, token.trim());
+  } else {
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
   }
 }
 
@@ -95,15 +162,141 @@ export async function fetchPublicDriveFile(fileId, responseType = 'text') {
 }
 
 /**
- * Validate current Google Drive Access Token and retrieve account email
+ * Automatically refresh an expired access token in the background using a stored refresh token
+ */
+export async function refreshAccessTokenInBackground() {
+  const refreshToken = getStoredRefreshToken();
+  if (!refreshToken) throw new Error('No refresh token available.');
+
+  const targetClientId = '407408718192.apps.googleusercontent.com'; // OAuth Playground client ID fallback
+
+  const params = new URLSearchParams();
+  params.append('client_id', targetClientId);
+  params.append('grant_type', 'refresh_token');
+  params.append('refresh_token', refreshToken);
+
+  let res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params,
+  });
+
+  if (!res.ok) {
+    const fallbackParams = new URLSearchParams();
+    fallbackParams.append('client_id', getStoredClientId());
+    fallbackParams.append('grant_type', 'refresh_token');
+    fallbackParams.append('refresh_token', refreshToken);
+
+    res = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: fallbackParams,
+    });
+  }
+
+  if (!res.ok) throw new Error('Background token refresh failed.');
+  const data = await res.json();
+  if (data.access_token) {
+    setStoredDriveToken(data.access_token);
+    return data.access_token;
+  }
+  throw new Error('No access token returned.');
+}
+
+/**
+ * Exchange OAuth Playground Authorization Code (starts with 4/0A...) for Access Token & Refresh Token
+ */
+export async function exchangeAuthCodeForToken(authCode, customClientId = '') {
+  const code = authCode.trim();
+  const targetClientId = '407408718192.apps.googleusercontent.com'; // OAuth Playground client ID
+
+  const params = new URLSearchParams();
+  params.append('code', code);
+  params.append('client_id', targetClientId);
+  params.append('grant_type', 'authorization_code');
+  params.append('redirect_uri', 'https://developers.google.com/oauthplayground');
+
+  let data = null;
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params,
+  });
+
+  if (!res.ok) {
+    // Retry with custom client ID if Playground default ID fails
+    const fallbackParams = new URLSearchParams();
+    fallbackParams.append('code', code);
+    fallbackParams.append('client_id', customClientId || getStoredClientId());
+    fallbackParams.append('grant_type', 'authorization_code');
+    fallbackParams.append('redirect_uri', 'https://developers.google.com/oauthplayground');
+
+    const fallbackRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: fallbackParams,
+    });
+
+    if (!fallbackRes.ok) {
+      const err = await fallbackRes.json().catch(() => ({}));
+      throw new Error(`Auth Code Exchange Failed: ${err.error_description || err.error || fallbackRes.statusText}`);
+    }
+    data = await fallbackRes.json();
+  } else {
+    data = await res.json();
+  }
+
+  if (data.access_token) {
+    setStoredDriveToken(data.access_token);
+    if (data.refresh_token) {
+      setStoredRefreshToken(data.refresh_token);
+    }
+    return data.access_token;
+  }
+  throw new Error('No access token returned from code exchange.');
+}
+
+/**
+ * Validate current Google Drive Access Token and retrieve account email (with background auto-refresh fallback)
  */
 export async function validateDriveToken(accessToken) {
-  const token = accessToken || getStoredDriveToken();
+  let token = (accessToken || getStoredDriveToken()).trim();
   if (!token) {
     throw new Error('No Google Drive Access Token provided.');
   }
 
-  const response = await fetch(`https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${encodeURIComponent(token)}`);
+  // Handle full JSON payloads pasted by user
+  if (token.startsWith('{') && token.includes('access_token')) {
+    try {
+      const parsed = JSON.parse(token);
+      if (parsed.access_token) token = parsed.access_token;
+      if (parsed.refresh_token) setStoredRefreshToken(parsed.refresh_token);
+    } catch {
+      // Ignore JSON error
+    }
+  }
+
+  // If user pasted an OAuth Playground Authorization Code (starts with 4/0A...), exchange it for Access Token
+  if (token.startsWith('4/0A') || token.startsWith('4/0a') || token.startsWith('4/0t')) {
+    try {
+      token = await exchangeAuthCodeForToken(token);
+    } catch (err) {
+      console.warn('[EduKatalyst Code Exchange Warn]:', err);
+    }
+  }
+
+  let response = await fetch(`https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${encodeURIComponent(token)}`);
+  
+  // If access token is expired, attempt seamless background token refresh!
+  if (!response.ok) {
+    try {
+      token = await refreshAccessTokenInBackground();
+      response = await fetch(`https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${encodeURIComponent(token)}`);
+    } catch {
+      // Background refresh failed
+    }
+  }
+
   if (!response.ok) {
     const errData = await response.json().catch(() => ({}));
     throw new Error(errData.error_description || errData.error || 'Invalid or expired Google Drive Access Token. Please sign in again.');
@@ -162,72 +355,58 @@ export function loadGoogleGsiScript() {
 }
 
 /**
- * Trigger official Google Account Sign-In OAuth 2.0 authorization page/popup
+ * 100% Reliable Direct Google OAuth 2.0 Page Redirect (Immune to browser popup blockers)
  */
-export async function promptGoogleDriveSignIn(customClientId = '') {
+export function redirectToGoogleOAuth(customClientId = '') {
+  const clientId = customClientId || getStoredClientId();
+  if (!clientId) throw new Error('Google OAuth Client ID is required.');
+
+  const cleanOrigin = window.location.origin.replace(/\/$/, '');
+  const redirectUri = cleanOrigin;
+  const scope = encodeURIComponent('https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email profile');
+  const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${scope}&prompt=consent`;
+
+  window.location.href = authUrl;
+}
+
+/**
+ * Direct Popup Window Google OAuth 2.0 Sign-In Fallback
+ */
+export function openGoogleOAuthPopup(customClientId = '') {
   const clientId = customClientId || getStoredClientId();
   if (!clientId) {
     throw new Error('Google OAuth Client ID is required.');
   }
 
-  try {
-    const oauth2 = await loadGoogleGsiScript();
-    return new Promise((resolve, reject) => {
-      const tokenClient = oauth2.initTokenClient({
-        client_id: clientId,
-        scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email profile',
-        prompt: 'select_account',
-        callback: (response) => {
-          if (response.error) {
-            reject(new Error(response.error_description || response.error));
-            return;
-          }
-          if (response.access_token) {
-            setStoredDriveToken(response.access_token);
-            resolve(response.access_token);
-          } else {
-            reject(new Error('No access token returned from Google Sign-In.'));
-          }
-        },
-      });
-
-      tokenClient.requestAccessToken();
-    });
-  } catch (err) {
-    return openGoogleOAuthPopupFallback(clientId);
-  }
-}
-
-/**
- * Fallback popup window authorization method
- */
-function openGoogleOAuthPopupFallback(clientId) {
   return new Promise((resolve, reject) => {
-    const redirectUri = window.location.origin + window.location.pathname;
+    const cleanOrigin = window.location.origin.replace(/\/$/, '');
+    const redirectUri = cleanOrigin;
     const scope = encodeURIComponent('https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email profile');
-    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${scope}&prompt=select_account`;
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${scope}`;
 
-    const width = 500;
-    const height = 650;
+    const width = 520;
+    const height = 680;
     const left = window.screenX + (window.outerWidth - width) / 2;
     const top = window.screenY + (window.outerHeight - height) / 2;
 
     const popup = window.open(
-      authUrl,
+      'about:blank',
       'GoogleAccountSignIn',
-      `width=${width},height=${height},top=${top},left=${left},scrollbars=yes`
+      `width=${width},height=${height},top=${top},left=${left},scrollbars=yes,resizable=yes`
     );
 
     if (!popup) {
-      reject(new Error('Popup blocked! Please allow popups for this site to sign in with Google.'));
+      reject(new Error('Popup window was blocked by your browser. Please allow popups for this site to sign in with Google.'));
       return;
     }
+
+    popup.location.href = authUrl;
 
     const timer = setInterval(() => {
       try {
         if (!popup || popup.closed) {
           clearInterval(timer);
-          reject(new Error('Google Sign-In window closed.'));
+          reject(new Error('Google Sign-In window was closed.'));
           return;
         }
 
@@ -246,10 +425,58 @@ function openGoogleOAuthPopupFallback(clientId) {
           }
         }
       } catch {
-        // Ignore cross-origin errors while user navigates Google Sign-In pages
+        // Ignore cross-origin security errors while user completes Google auth pages
       }
-    }, 500);
+    }, 400);
   });
+}
+
+/**
+ * Trigger official Google Account Sign-In OAuth 2.0 via GSI Token Client (Zero redirect_uri requirement)
+ */
+export async function promptGoogleDriveSignIn(customClientId = '') {
+  const clientId = customClientId || getStoredClientId();
+  if (!clientId) {
+    throw new Error('Google OAuth Client ID is required.');
+  }
+
+  console.log('[EduKatalyst GIS] Requesting OAuth Token from origin:', window.location.origin, 'with Client ID:', clientId);
+
+  try {
+    const oauth2 = await loadGoogleGsiScript();
+    return await new Promise((resolve, reject) => {
+      const tokenClient = oauth2.initTokenClient({
+        client_id: clientId,
+        scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email profile',
+        callback: (response) => {
+          console.log('[EduKatalyst GIS Response]:', response);
+          if (response.error) {
+            reject(new Error(response.error_description || response.error));
+            return;
+          }
+          if (response.access_token) {
+            setStoredDriveToken(response.access_token);
+            resolve(response.access_token);
+          } else {
+            reject(new Error('No access token returned from Google Sign-In.'));
+          }
+        },
+        error_callback: (err) => {
+          console.warn('[EduKatalyst GIS Error Callback]:', err);
+          if (err.type === 'popup_closed') {
+            reject(new Error('Google Sign-In popup window was closed before signing in.'));
+          } else {
+            reject(new Error(err.message || 'Google Sign-In failed'));
+          }
+        }
+      });
+
+      tokenClient.requestAccessToken();
+    });
+  } catch (err) {
+    console.warn('[EduKatalyst GIS load error, using direct popup fallback]:', err);
+    return openGoogleOAuthPopup(clientId);
+  }
 }
 
 /**
@@ -267,7 +494,7 @@ export async function ensureDriveAppFolder(token) {
 
   if (!searchRes.ok) {
     const errData = await searchRes.json().catch(() => ({}));
-    const detailMsg = errData.error?.message || searchRes.statusText || 'Unknown Google Drive API error';
+    const detailMsg = errData.error?.message || errData.error_description || (searchRes.status === 403 ? 'Insufficient Permission: Please sign out and re-consent to Google Drive permissions.' : searchRes.statusText) || 'Unknown Google Drive API error';
     if (detailMsg.includes('disabled') || detailMsg.includes('has not been used in project')) {
       throw new Error(`Google Drive API is disabled in your Google Cloud Console project. Enable it at https://console.cloud.google.com/apis/library/drive.googleapis.com`);
     }

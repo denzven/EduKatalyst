@@ -55,6 +55,8 @@ import {
   getStoredClientId,
   setStoredClientId,
   promptGoogleDriveSignIn,
+  redirectToGoogleOAuth,
+  checkAndExtractOAuthHashToken,
   validateDriveToken, 
   uploadZipToDrive, 
   listDriveBackups, 
@@ -88,11 +90,16 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
   const [isProcessing, setIsProcessing] = useState(false);
 
   useEffect(() => {
+    const extractedToken = checkAndExtractOAuthHashToken();
+    const tokenToUse = extractedToken || driveToken;
+    if (extractedToken) {
+      setDriveToken(extractedToken);
+    }
     if (githubToken) {
       handleTestGitHub(githubToken, true);
     }
-    if (driveToken) {
-      handleTestDrive(driveToken, true);
+    if (tokenToUse) {
+      handleTestDrive(tokenToUse, true);
     }
   }, []);
 
@@ -224,14 +231,22 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
       setDriveToken(newToken);
       await handleTestDrive(newToken);
     } catch (err) {
-      if (err.message.includes('Google Drive API is disabled') || err.message.includes('has not been used in project')) {
+      console.error('[Google Sign-In Diagnostic Error]:', err);
+      const errMsg = String(err?.message || err?.error_description || err?.error || err || 'Unknown Error');
+
+      if (errMsg.includes('popup_closed_by_user')) {
+        setStatusMsg({
+          type: 'info',
+          text: 'Google Sign-In popup was closed before completing authentication. Please click "Sign in with Google Account" again.'
+        });
+      } else if (errMsg.includes('Google Drive API is disabled') || errMsg.includes('has not been used in project')) {
         setStatusMsg({ 
           type: 'error', 
           text: 'Google Drive API is disabled in your Google Cloud Console project. Click the link below to enable Google Drive API for your project in 1 click.',
           link: 'https://console.cloud.google.com/apis/library/drive.googleapis.com',
           linkText: 'Enable Google Drive API'
         });
-      } else if (err.message.includes('403') || err.message.includes('access_denied')) {
+      } else if (errMsg.includes('403') || errMsg.includes('access_denied')) {
         setStatusMsg({ 
           type: 'error', 
           text: 'Google OAuth Error 403 (access_denied): Your app is in Testing status. Add your email address to "Test users" in Google Cloud OAuth Consent Screen, or click "Publish App" to make it public.',
@@ -239,7 +254,7 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
           linkText: 'Open OAuth Consent Screen'
         });
         setShowSetupGuide(true);
-      } else if (err.message.includes('400') || err.message.includes('origin_mismatch') || err.message.includes('origin')) {
+      } else if (errMsg.includes('400') || errMsg.includes('origin_mismatch') || errMsg.includes('origin')) {
         setStatusMsg({ 
           type: 'error', 
           text: `Google OAuth Error 400 (origin_mismatch): Your browser is accessing "${window.location.origin}". Add "${window.location.origin}" to Authorized JavaScript origins in Google Cloud Console, or open "http://localhost:5173" in your browser.`,
@@ -247,7 +262,7 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
           linkText: 'Fix in Google Cloud Console'
         });
         setShowSetupGuide(true);
-      } else if (err.message.includes('401') || err.message.includes('invalid_client') || err.message.includes('client')) {
+      } else if (errMsg.includes('401') || errMsg.includes('invalid_client') || errMsg.includes('client')) {
         setStatusMsg({ 
           type: 'error', 
           text: 'Google OAuth Error 401: Invalid Client ID. Please verify your OAuth Client ID in Google Cloud Console.',
@@ -256,7 +271,7 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
         });
         setShowSetupGuide(true);
       } else {
-        setStatusMsg({ type: 'error', text: `Google Sign-In Error: ${err.message}` });
+        setStatusMsg({ type: 'error', text: `Google Sign-In Error: ${errMsg}` });
       }
     } finally {
       setIsSigningInGoogle(false);
@@ -373,27 +388,24 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
 
   const handleRunDriveIntegrationTest = async () => {
     let tokenToUse = driveToken || getStoredDriveToken();
-    let isValid = false;
 
     if (tokenToUse) {
       try {
         await validateDriveToken(tokenToUse);
-        isValid = true;
       } catch {
-        isValid = false;
+        tokenToUse = null;
       }
     }
 
-    if (!isValid) {
-      try {
-        setStatusMsg({ type: 'info', text: 'Opening Google Sign-In window for test authentication...' });
-        tokenToUse = await promptGoogleDriveSignIn();
-        setDriveToken(tokenToUse);
-        await handleTestDrive(tokenToUse, true);
-      } catch (authErr) {
-        setStatusMsg({ type: 'error', text: `Integration Test Failed: Google Sign-In required (${authErr.message})` });
-        return;
-      }
+    if (!tokenToUse) {
+      setStatusMsg({ 
+        type: 'error', 
+        text: 'Google Drive token missing or expired. Click the link below to get a 1-click pre-filled token from Google OAuth Playground.',
+        link: 'https://developers.google.com/oauthplayground/#step1&scopes=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive.file%20https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email',
+        linkText: '🔗 Get 1-Click Token from Google OAuth Playground'
+      });
+      setAuthMode('token');
+      return;
     }
 
     setIsProcessing(true);
@@ -654,19 +666,49 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
                       </div>
                     </div>
 
-                    {/* Primary Google Sign-In Button */}
-                    <button
-                      onClick={handleGoogleSignIn}
-                      disabled={isSigningInGoogle}
-                      className="w-full py-3 px-4 rounded-xl bg-white hover:bg-gray-100 text-gray-900 font-bold text-xs shadow-md border border-gray-300 flex items-center justify-center space-x-2.5 transition active:scale-[0.99] cursor-pointer"
-                    >
-                      {isSigningInGoogle ? (
-                        <RefreshCw className="w-4 h-4 animate-spin text-gray-700" />
-                      ) : (
-                        <GoogleIcon className="w-4 h-4" />
-                      )}
-                      <span>{isSigningInGoogle ? 'Opening Google Sign-In...' : 'Sign in with Google Account'}</span>
-                    </button>
+                    {/* Origin Diagnostic Info Box */}
+                    <div className="p-3 rounded-xl bg-[var(--bg-ground)] border border-[var(--border-color)] text-[11px] font-mono space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[var(--text-muted)]">Current Browser Origin:</span>
+                        <strong className="text-[var(--accent-coral)]">{window.location.origin}</strong>
+                      </div>
+                      <p className="text-[10px] text-[var(--text-muted)] leading-tight">
+                        Must match <strong>Authorized JavaScript origins</strong> in Google Cloud Console.
+                      </p>
+                    </div>
+
+                    {/* Primary Google Sign-In Buttons */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                      <button
+                        onClick={handleGoogleSignIn}
+                        disabled={isSigningInGoogle}
+                        className="py-2.5 px-3 rounded-xl bg-[var(--accent-coral)] text-white dark:text-[#261619] font-extrabold text-xs flex items-center justify-center space-x-1.5 transition shadow-md hover:opacity-90 disabled:opacity-50 cursor-pointer"
+                      >
+                        {isSigningInGoogle ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            <span>Connecting...</span>
+                          </>
+                        ) : (
+                          <>
+                            <GoogleIcon className="w-3.5 h-3.5" />
+                            <span>Sign In (Popup Window)</span>
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          const cId = clientIdInput.trim() || getStoredClientId();
+                          setStoredClientId(cId);
+                          redirectToGoogleOAuth(cId);
+                        }}
+                        className="py-2.5 px-3 rounded-xl bg-[var(--bg-ground)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border-color)] text-[var(--accent-peach)] font-bold text-xs flex items-center justify-center space-x-1.5 transition cursor-pointer"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5 text-[var(--accent-peach)]" />
+                        <span>Sign In (Direct Page)</span>
+                      </button>
+                    </div>
 
                     {/* 3-Step Setup Guide Trigger */}
                     <div className="pt-1">
@@ -703,10 +745,24 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
 
                   </div>
                 ) : (
-                  <div className="space-y-2.5">
-                    <p className="text-[var(--text-muted)] text-[11px]">
-                      Paste a Google OAuth access token directly (e.g. generated from <a href="https://developers.google.com/oauthplayground" target="_blank" rel="noreferrer" className="text-[var(--accent-peach)] underline">OAuth Playground</a> with Drive scope).
-                    </p>
+                  <div className="space-y-3">
+                    <div className="p-3.5 rounded-xl bg-[var(--bg-ground)] border border-[var(--border-color)] space-y-2">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <span className="font-bold text-[var(--text-primary)] text-xs font-heading">Need a 1-Click Access Token?</span>
+                        <a
+                          href="https://developers.google.com/oauthplayground/#step1&scopes=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive.file%20https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="px-3 py-1.5 rounded-lg bg-[var(--accent-coral)]/15 border border-[var(--accent-coral)]/30 text-[var(--accent-coral)] hover:bg-[var(--accent-coral)]/25 font-bold text-xs flex items-center gap-1.5 transition shrink-0"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          <span>🔗 Get 1-Click Token (Google Playground)</span>
+                        </a>
+                      </div>
+                      <p className="text-[10px] text-[var(--text-muted)] leading-relaxed">
+                        Click the link → Click <strong>Authorize APIs</strong> → Click <strong>Exchange authorization code for tokens</strong> → Copy the Access Token (or Auth Code) and paste it below!
+                      </p>
+                    </div>
 
                     <div className="flex space-x-2">
                       <div className="relative flex-1">
