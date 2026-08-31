@@ -51,7 +51,12 @@ export async function saveVideoSession(sessionData) {
     };
 
     const request = store.put(record);
-    request.onsuccess = () => resolve(record);
+    request.onsuccess = () => {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('katalyst_storage_updated'));
+      }
+      resolve(record);
+    };
     request.onerror = () => reject(request.error);
   });
 }
@@ -84,7 +89,12 @@ export async function deleteVideoSession(id) {
     const transaction = db.transaction(STORE_NAME, 'readwrite');
     const store = transaction.objectStore(STORE_NAME);
     const request = store.delete(id);
-    request.onsuccess = () => resolve(true);
+    request.onsuccess = () => {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('katalyst_storage_updated'));
+      }
+      resolve(true);
+    };
     request.onerror = () => reject(request.error);
   });
 }
@@ -95,7 +105,12 @@ export async function clearAllSessions() {
     const transaction = db.transaction(STORE_NAME, 'readwrite');
     const store = transaction.objectStore(STORE_NAME);
     const request = store.clear();
-    request.onsuccess = () => resolve(true);
+    request.onsuccess = () => {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('katalyst_storage_updated'));
+      }
+      resolve(true);
+    };
     request.onerror = () => reject(request.error);
   });
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   HardDrive, 
   Cloud, 
@@ -13,6 +13,10 @@ import {
   Info,
   Trash2,
   Lock,
+  Unlock,
+  X,
+  Eye,
+  EyeOff,
   FileCode,
   FolderArchive,
   LogOut,
@@ -52,18 +56,62 @@ import {
 import { 
   getStoredDriveToken, 
   setStoredDriveToken, 
+  checkAndExtractOAuthHashToken,
   getStoredClientId,
   setStoredClientId,
-  promptGoogleDriveSignIn,
-  redirectToGoogleOAuth,
-  checkAndExtractOAuthHashToken,
   validateDriveToken, 
   uploadZipToDrive, 
   listDriveBackups, 
-  downloadFromDrive 
+  downloadFromDrive,
+  fetchMasterLedger,
+  updateMasterLedger
 } from '../utils/googleDriveSync';
+import { GoogleOAuthProvider, GoogleLogin, useGoogleLogin } from '@react-oauth/google';
 import { exportSessionToZip, importSessionFromZip, exportMasterBundle } from '../utils/zipHelper';
 import { saveVideoSession } from '../utils/storage';
+
+function decodeGoogleJwt(token) {
+  try {
+    const base64Url = token.split('.')[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split('')
+        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    );
+    return JSON.parse(jsonPayload);
+  } catch (err) {
+    console.error('Failed to decode Google JWT:', err);
+    return null;
+  }
+}
+
+function CleanGoogleSignInComponent({ onSuccessCredential, onError }) {
+  const isDark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
+
+  return (
+    <GoogleLogin
+      onSuccess={(credentialResponse) => {
+        console.log('[Google Credential Response]:', credentialResponse);
+        if (credentialResponse.credential) {
+          const decoded = decodeGoogleJwt(credentialResponse.credential);
+          if (decoded && decoded.email) {
+            onSuccessCredential(decoded);
+          }
+        }
+      }}
+      onError={() => {
+        console.warn('[Google Login Failed]');
+        onError(new Error('Google Sign-In failed or popup was closed.'));
+      }}
+      shape="pill"
+      theme={isDark ? "filled_black" : "outline"}
+      size="large"
+      width="280"
+    />
+  );
+}
 
 export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
   const [activeTab, setActiveTab] = useState('gdrive'); // default to gdrive
@@ -83,24 +131,140 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
   const [isSigningInGoogle, setIsSigningInGoogle] = useState(false);
   const [driveFiles, setDriveFiles] = useState([]);
   const [showSetupGuide, setShowSetupGuide] = useState(false);
-  const [authMode, setAuthMode] = useState('signin'); // 'signin' | 'token'
+  // Token Visibility Protection State
+  const [showDriveTokenPass, setShowDriveTokenPass] = useState(false);
+  const [showGithubTokenPass, setShowGithubTokenPass] = useState(false);
   
   // Global Status & Action States
   const [statusMsg, setStatusMsg] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
 
+  // Master Security Passcode Protection State
+  const [passcodeModalOpen, setPasscodeModalOpen] = useState(false);
+  const [passcodeInput, setPasscodeInput] = useState('');
+  const [passcodeVerified, setPasscodeVerified] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem('katalyst_creator_passcode_verified') === 'true';
+  });
+  const [passcodeError, setPasscodeError] = useState('');
+  const pendingMasterActionRef = useRef(null);
+
+  const checkPasscodeProtection = (actionToRun) => {
+    if (passcodeVerified) {
+      actionToRun();
+    } else {
+      pendingMasterActionRef.current = actionToRun;
+      setPasscodeError('');
+      setPasscodeInput('');
+      setPasscodeModalOpen(true);
+    }
+  };
+
+  const handleVerifyPasscode = (e) => {
+    e?.preventDefault();
+    const targetPasscode = import.meta.env.VITE_MASTER_PUBLISH_PASSCODE || 'edukatalyst2026';
+    if (passcodeInput.trim() === targetPasscode) {
+      localStorage.setItem('katalyst_creator_passcode_verified', 'true');
+      setPasscodeVerified(true);
+      setPasscodeModalOpen(false);
+      setPasscodeError('');
+      setStatusMsg({ type: 'success', text: '🔐 Master Creator Passcode Verified! Upload access granted.' });
+      if (pendingMasterActionRef.current) {
+        const fn = pendingMasterActionRef.current;
+        pendingMasterActionRef.current = null;
+        fn();
+      }
+    } else {
+      setPasscodeError('Incorrect passcode! Contact system administrator for access.');
+    }
+  };
+
+  const handleLockMasterPool = () => {
+    localStorage.removeItem('katalyst_creator_passcode_verified');
+    setPasscodeVerified(false);
+    setStatusMsg({ type: 'info', text: '🔒 Master Drive Storage Pool Locked.' });
+  };
+
+  const requestDriveAccess = useGoogleLogin({
+    onSuccess: async (tokenResponse) => {
+      console.log('[Google Drive Access Scope Granted]:', tokenResponse);
+      if (tokenResponse.access_token) {
+        const token = tokenResponse.access_token;
+        setDriveToken(token);
+        setStoredDriveToken(token);
+        
+        try {
+          const user = await validateDriveToken(token);
+          setDriveUser(user);
+        } catch (e) {
+          console.warn('Drive token validate warning:', e);
+        }
+
+        if (pendingActionRef.current === 'test') {
+          pendingActionRef.current = null;
+          runDriveTestWithToken(token);
+        } else if (pendingActionRef.current === 'master') {
+          pendingActionRef.current = null;
+          uploadMasterWithToken(token);
+        } else if (pendingActionRef.current === 'session' && pendingSessionRef.current) {
+          const sess = pendingSessionRef.current;
+          pendingActionRef.current = null;
+          pendingSessionRef.current = null;
+          uploadZipWithToken(sess, token);
+        }
+      }
+    },
+    onError: (errorResponse) => {
+      console.warn('[Google OAuth Access Request Cancelled]:', errorResponse);
+      setStatusMsg({ 
+        type: 'error', 
+        text: 'Google Drive access token missing. Enter your token below or use the 1-click Google OAuth Playground link.',
+        link: 'https://developers.google.com/oauthplayground/#step1&scopes=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive.file%20https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email',
+        linkText: 'OAuth Playground Link'
+      });
+      setShowTokenInput(true);
+    },
+    scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email profile',
+  });
+
   useEffect(() => {
+    const refreshSessions = async () => {
+      try {
+        const data = await getAllVideoSessions();
+        setSessions(data);
+      } catch (e) {
+        console.warn('Failed to load local sessions:', e);
+      }
+    };
+
+    refreshSessions();
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('katalyst_storage_updated', refreshSessions);
+    }
+
     const extractedToken = checkAndExtractOAuthHashToken();
-    const tokenToUse = extractedToken || driveToken;
+    const activeDriveToken = extractedToken || driveToken;
+
     if (extractedToken) {
       setDriveToken(extractedToken);
+      setStatusMsg({
+        type: 'success',
+        text: 'Google Drive OAuth access token acquired! Verifying cloud connection...'
+      });
     }
     if (githubToken) {
       handleTestGitHub(githubToken, true);
     }
-    if (tokenToUse) {
-      handleTestDrive(tokenToUse, true);
+    if (activeDriveToken) {
+      handleTestDrive(activeDriveToken, false);
     }
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('katalyst_storage_updated', refreshSessions);
+      }
+    };
   }, []);
 
   // --- GitHub Handlers ---
@@ -214,67 +378,9 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
   // --- Google Drive Handlers ---
   const handleGoogleSignIn = async () => {
     const cleanedClientId = clientIdInput.trim();
-    if (!cleanedClientId) {
-      setStatusMsg({ 
-        type: 'error', 
-        text: 'Please paste your Google OAuth Client ID below before signing in. Expand the 3-step setup guide if you need a free Client ID.' 
-      });
-      setShowSetupGuide(true);
-      return;
-    }
-
-    setIsSigningInGoogle(true);
-    setStatusMsg(null);
-    try {
+    if (cleanedClientId) {
       setStoredClientId(cleanedClientId);
-      const newToken = await promptGoogleDriveSignIn(cleanedClientId);
-      setDriveToken(newToken);
-      await handleTestDrive(newToken);
-    } catch (err) {
-      console.error('[Google Sign-In Diagnostic Error]:', err);
-      const errMsg = String(err?.message || err?.error_description || err?.error || err || 'Unknown Error');
-
-      if (errMsg.includes('popup_closed_by_user')) {
-        setStatusMsg({
-          type: 'info',
-          text: 'Google Sign-In popup was closed before completing authentication. Please click "Sign in with Google Account" again.'
-        });
-      } else if (errMsg.includes('Google Drive API is disabled') || errMsg.includes('has not been used in project')) {
-        setStatusMsg({ 
-          type: 'error', 
-          text: 'Google Drive API is disabled in your Google Cloud Console project. Click the link below to enable Google Drive API for your project in 1 click.',
-          link: 'https://console.cloud.google.com/apis/library/drive.googleapis.com',
-          linkText: 'Enable Google Drive API'
-        });
-      } else if (errMsg.includes('403') || errMsg.includes('access_denied')) {
-        setStatusMsg({ 
-          type: 'error', 
-          text: 'Google OAuth Error 403 (access_denied): Your app is in Testing status. Add your email address to "Test users" in Google Cloud OAuth Consent Screen, or click "Publish App" to make it public.',
-          link: 'https://console.cloud.google.com/apis/credentials/consent',
-          linkText: 'Open OAuth Consent Screen'
-        });
-        setShowSetupGuide(true);
-      } else if (errMsg.includes('400') || errMsg.includes('origin_mismatch') || errMsg.includes('origin')) {
-        setStatusMsg({ 
-          type: 'error', 
-          text: `Google OAuth Error 400 (origin_mismatch): Your browser is accessing "${window.location.origin}". Add "${window.location.origin}" to Authorized JavaScript origins in Google Cloud Console, or open "http://localhost:5173" in your browser.`,
-          link: 'https://console.cloud.google.com/apis/credentials',
-          linkText: 'Fix in Google Cloud Console'
-        });
-        setShowSetupGuide(true);
-      } else if (errMsg.includes('401') || errMsg.includes('invalid_client') || errMsg.includes('client')) {
-        setStatusMsg({ 
-          type: 'error', 
-          text: 'Google OAuth Error 401: Invalid Client ID. Please verify your OAuth Client ID in Google Cloud Console.',
-          link: 'https://console.cloud.google.com/apis/credentials',
-          linkText: 'Open Google Cloud Console'
-        });
-        setShowSetupGuide(true);
-      } else {
-        setStatusMsg({ type: 'error', text: `Google Sign-In Error: ${errMsg}` });
-      }
-    } finally {
-      setIsSigningInGoogle(false);
+      setStatusMsg({ type: 'info', text: 'Client ID updated. Use the Google Sign-In button below.' });
     }
   };
 
@@ -315,7 +421,7 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
     }
   };
 
-  const handleUploadZipToDrive = async (session) => {
+  const uploadZipWithToken = async (session, tokenToUse) => {
     if (!session) {
       setStatusMsg({ type: 'error', text: 'Select a video session to upload to Google Drive.' });
       return;
@@ -330,13 +436,13 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
       
       await exportSessionToZip(session, async (blob) => {
         setStatusMsg({ type: 'info', text: `Uploading package to Google Drive "EduKatalyst Storage" folder...` });
-        const driveFile = await uploadZipToDrive(blob, zipFilename, driveToken);
+        const driveFile = await uploadZipToDrive(blob, zipFilename, tokenToUse);
         setStatusMsg({ 
           type: 'success', 
           text: `Uploaded "${driveFile.name}" to Google Drive successfully!` 
         });
         
-        const files = await listDriveBackups(driveToken);
+        const files = await listDriveBackups(tokenToUse);
         setDriveFiles(files);
       });
 
@@ -347,20 +453,18 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
     }
   };
 
-  const handleUploadMasterZipToDrive = async () => {
-    let tokenToUse = driveToken || getStoredDriveToken();
-    if (!tokenToUse) {
-      try {
-        setStatusMsg({ type: 'info', text: 'Opening Google Sign-In window...' });
-        tokenToUse = await promptGoogleDriveSignIn();
-        setDriveToken(tokenToUse);
-        await handleTestDrive(tokenToUse, true);
-      } catch (authErr) {
-        setStatusMsg({ type: 'error', text: `Google Sign-In Required: ${authErr.message}` });
+  const handleUploadZipToDrive = async (session) => {
+    checkPasscodeProtection(async () => {
+      let tokenToUse = driveToken || getStoredDriveToken();
+      if (!tokenToUse) {
+        setShowTokenInput(true);
         return;
       }
-    }
+      await uploadZipWithToken(session, tokenToUse);
+    });
+  };
 
+  const uploadMasterWithToken = async (tokenToUse) => {
     setIsProcessing(true);
     setStatusMsg(null);
     try {
@@ -368,11 +472,24 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
       setStatusMsg({ type: 'info', text: 'Packaging all videos, notes, quizzes, and subjects into master library...' });
 
       await exportMasterBundle(sessions, async (blob) => {
-        setStatusMsg({ type: 'info', text: 'Publishing master library to Google Drive "EduKatalyst Storage" folder...' });
+        setStatusMsg({ type: 'info', text: 'Publishing master library & updating Master Sync Ledgerbook on Google Drive...' });
         const driveFile = await uploadZipToDrive(blob, zipFilename, tokenToUse);
+        
+        // Update Master Sync Ledgerbook on Google Drive
+        await updateMasterLedger({
+          activeMasterZip: zipFilename,
+          activeMasterZipId: driveFile.id,
+          sessionCount: sessions.length,
+          stats: {
+            videos: sessions.filter(s => !s.id.startsWith('note_') && !s.id.startsWith('quiz_')).length,
+            notes: sessions.filter(s => s.id.startsWith('note_')).length,
+            quizzes: sessions.filter(s => s.id.startsWith('quiz_')).length
+          }
+        }, tokenToUse);
+
         setStatusMsg({ 
           type: 'success', 
-          text: `🚀 Successfully Published Official Master Library ("${driveFile.name}") to Google Drive!` 
+          text: `🚀 Successfully Published Master Library ("${driveFile.name}") & Updated Master Sync Ledgerbook!` 
         });
 
         const files = await listDriveBackups(tokenToUse);
@@ -386,28 +503,18 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
     }
   };
 
-  const handleRunDriveIntegrationTest = async () => {
-    let tokenToUse = driveToken || getStoredDriveToken();
-
-    if (tokenToUse) {
-      try {
-        await validateDriveToken(tokenToUse);
-      } catch {
-        tokenToUse = null;
+  const handleUploadMasterZipToDrive = async () => {
+    checkPasscodeProtection(async () => {
+      let tokenToUse = driveToken || getStoredDriveToken();
+      if (!tokenToUse) {
+        setShowTokenInput(true);
+        return;
       }
-    }
+      await uploadMasterWithToken(tokenToUse);
+    });
+  };
 
-    if (!tokenToUse) {
-      setStatusMsg({ 
-        type: 'error', 
-        text: 'Google Drive token missing or expired. Click the link below to get a 1-click pre-filled token from Google OAuth Playground.',
-        link: 'https://developers.google.com/oauthplayground/#step1&scopes=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive.file%20https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email',
-        linkText: '🔗 Get 1-Click Token from Google OAuth Playground'
-      });
-      setAuthMode('token');
-      return;
-    }
-
+  const runDriveTestWithToken = async (tokenToUse) => {
     setIsProcessing(true);
     setStatusMsg({ type: 'info', text: '🧪 STEP 1/4: Generating sample diagnostic test file...' });
 
@@ -471,12 +578,34 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
     }
   };
 
+  const handleRunDriveIntegrationTest = async () => {
+    checkPasscodeProtection(async () => {
+      let tokenToUse = driveToken || getStoredDriveToken();
+
+      if (tokenToUse) {
+        try {
+          await validateDriveToken(tokenToUse);
+        } catch {
+          tokenToUse = null;
+        }
+      }
+
+      if (!tokenToUse) {
+        setShowTokenInput(true);
+        return;
+      }
+
+      await runDriveTestWithToken(tokenToUse);
+    });
+  };
+
   const handleRestoreFromDrive = async (fileId, fileName) => {
     setIsProcessing(true);
     setStatusMsg(null);
     try {
+      let tokenToUse = driveToken || getStoredDriveToken();
       setStatusMsg({ type: 'info', text: `Downloading "${fileName}" from Google Drive...` });
-      const blob = await downloadFromDrive(fileId, driveToken);
+      const blob = await downloadFromDrive(fileId, tokenToUse);
 
       setStatusMsg({ type: 'info', text: `Extracting Zip package into IndexedDB...` });
       await importSessionFromZip(blob);
@@ -490,48 +619,98 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
     }
   };
 
+  const handleSyncDriveToWebsite = async () => {
+    setIsProcessing(true);
+    setStatusMsg(null);
+    try {
+      let tokenToUse = driveToken || getStoredDriveToken();
+      setStatusMsg({ type: 'info', text: '🌐 STEP 1/2: Fetching latest master library from Google Drive...' });
+      
+      const files = await listDriveBackups(tokenToUse);
+      setDriveFiles(files);
+      
+      if (!files || files.length === 0) {
+        throw new Error('No master library found on Google Drive. Click "Sync Local Pool to Google Drive" first to publish!');
+      }
+
+      const latestMasterFile = files[0];
+      setStatusMsg({ type: 'info', text: `🌐 STEP 2/2: Downloading & Syncing "${latestMasterFile.name}" to live website content...` });
+      
+      const blob = await downloadFromDrive(latestMasterFile.id, tokenToUse);
+      await importSessionFromZip(blob);
+
+      setStatusMsg({ 
+        type: 'success', 
+        text: `🎉 LIVE WEBSITE SYNC COMPLETE! Unpacked & published all videos, notes, and quizzes from Google Drive to live website content!` 
+      });
+      
+      onRefreshSessions?.();
+    } catch (err) {
+      setStatusMsg({ type: 'error', text: `Drive to Website Sync Failed: ${err.message}` });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   return (
     <div className="space-y-6 text-xs text-[var(--text-primary)]">
       
-      {/* Header Banner */}
-      <div className="p-4 rounded-2xl bg-gradient-to-r from-[var(--accent-coral)]/15 via-[var(--accent-peach)]/10 to-transparent border border-[var(--border-color)] flex items-center justify-between">
-        <div className="space-y-1">
-          <h3 className="text-sm font-bold font-heading text-[var(--text-primary)] flex items-center gap-2">
-            <Cloud className="w-4 h-4 text-[var(--accent-coral)]" />
-            <span>EduKatalyst Cloud Sync & Backup Engine</span>
-          </h3>
-          <p className="text-[11px] text-[var(--text-muted)]">
-            Sync lecture encryption keys, video stream bundles, and metadata across your devices using Google Drive or GitHub.
+      {/* Premium Futuristic Header Banner */}
+      <div className="p-5 rounded-3xl bg-gradient-to-r from-[var(--accent-coral)]/20 via-[var(--accent-peach)]/10 to-transparent border border-[var(--border-color)] flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-lg relative overflow-hidden">
+        <div className="space-y-1 z-10">
+          <div className="flex items-center gap-2">
+            <div className="p-2 rounded-xl bg-[var(--accent-coral)]/20 text-[var(--accent-coral)] border border-[var(--accent-coral)]/30">
+              <Cloud className="w-5 h-5" />
+            </div>
+            <h3 className="text-base font-extrabold font-heading text-[var(--text-primary)] tracking-tight">
+              Cloud Storage & Sync Hub
+            </h3>
+          </div>
+          <p className="text-[11.5px] text-[var(--text-muted)] leading-relaxed max-w-xl">
+            Publish, backup, and sync course materials, video encryption keys, notes, and quizzes to the central Master Drive Pool.
           </p>
+        </div>
+
+        {/* Live Quick Stats Badges */}
+        <div className="flex items-center gap-2 shrink-0 z-10">
+          <div className="px-3 py-1.5 rounded-xl bg-[var(--bg-surface)]/80 border border-[var(--border-color)] text-[11px] font-mono text-[var(--text-secondary)] flex items-center gap-1.5 shadow-sm backdrop-blur-sm">
+            <HardDrive className="w-3.5 h-3.5 text-[var(--accent-coral)]" />
+            <span>Local: <strong className="text-[var(--text-primary)] font-bold">{sessions.length}</strong></span>
+          </div>
+
+          <div className="px-3 py-1.5 rounded-xl bg-[var(--bg-surface)]/80 border border-[var(--border-color)] text-[11px] font-mono text-[var(--text-secondary)] flex items-center gap-1.5 shadow-sm backdrop-blur-sm">
+            <FolderArchive className="w-3.5 h-3.5 text-[var(--accent-peach)]" />
+            <span>Cloud: <strong className="text-[var(--text-primary)] font-bold">{driveFiles.length}</strong></span>
+          </div>
         </div>
       </div>
 
-      {/* Cloud Provider Tabs */}
-      <div className="flex border-b border-[var(--border-color)] space-x-4">
+      {/* Segmented Controller Tab Bar */}
+      <div className="p-1.5 rounded-2xl bg-[var(--bg-ground)] border border-[var(--border-color)] flex items-center space-x-1.5 shadow-inner">
         <button
           onClick={() => setActiveTab('gdrive')}
-          className={`pb-2.5 font-bold transition flex items-center space-x-2 border-b-2 ${
+          className={`flex-1 py-2.5 px-4 rounded-xl font-extrabold text-xs transition flex items-center justify-center space-x-2 cursor-pointer ${
             activeTab === 'gdrive'
-              ? 'border-[var(--accent-coral)] text-[var(--accent-coral)]'
-              : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+              ? 'bg-[var(--accent-coral)] text-white dark:text-[#261619] shadow-md'
+              : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)]/50'
           }`}
         >
           <GoogleIcon className="w-4 h-4" />
-          <span>Google Drive Sync</span>
-          {driveUser && <span className="w-2 h-2 rounded-full bg-emerald-400"></span>}
+          <span>Google Drive Master Pool</span>
+          {driveUser && <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>}
         </button>
 
         <button
           onClick={() => setActiveTab('github')}
-          className={`pb-2.5 font-bold transition flex items-center space-x-2 border-b-2 ${
+          className={`flex-1 py-2.5 px-4 rounded-xl font-extrabold text-xs transition flex items-center justify-center space-x-2 cursor-pointer ${
             activeTab === 'github'
-              ? 'border-[var(--accent-coral)] text-[var(--accent-coral)]'
-              : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+              ? 'bg-[var(--accent-coral)] text-white dark:text-[#261619] shadow-md'
+              : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)]/50'
           }`}
         >
           <GithubIcon className="w-4 h-4" />
-          <span>GitHub Gist Sync</span>
-          {githubUser && <span className="w-2 h-2 rounded-full bg-emerald-400"></span>}
+          <span>GitHub Gist Backup</span>
+          {githubUser && <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>}
         </button>
       </div>
 
@@ -575,10 +754,22 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
           
           {/* Google Account Authentication Card */}
           <div className="p-5 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)] space-y-4">
-            <div className="flex items-center justify-between border-b border-[var(--border-color)] pb-3">
-              <div className="flex items-center space-x-2">
+            <div className="flex flex-wrap items-center justify-between gap-2.5 border-b border-[var(--border-color)] pb-3">
+              <div className="flex flex-wrap items-center gap-2">
                 <GoogleIcon className="w-5 h-5" />
-                <h4 className="font-bold text-[var(--text-primary)] text-sm">Google Drive Integration</h4>
+                <h4 className="font-bold text-[var(--text-primary)] text-sm font-heading">Google Drive Master Pool</h4>
+                <button
+                  onClick={passcodeVerified ? handleLockMasterPool : () => setPasscodeModalOpen(true)}
+                  title={passcodeVerified ? "Click to lock Master Pool" : "Click to unlock Master Pool with Passcode"}
+                  className={`px-2.5 py-0.5 rounded-full text-[10.5px] font-mono flex items-center gap-1 transition cursor-pointer border ${
+                    passcodeVerified
+                      ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300 hover:bg-rose-950/40 hover:border-rose-500/40 hover:text-rose-300'
+                      : 'bg-amber-950/40 border-amber-500/40 text-amber-300 hover:bg-amber-900/60'
+                  }`}
+                >
+                  {passcodeVerified ? <Unlock className="w-3 h-3 text-emerald-400" /> : <Lock className="w-3 h-3 text-amber-400" />}
+                  <span>{passcodeVerified ? 'Unlocked' : 'Locked'}</span>
+                </button>
               </div>
 
               {driveUser ? (
@@ -592,265 +783,217 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
             </div>
 
             {driveUser ? (
-              <div className="flex items-center justify-between p-3.5 rounded-xl bg-[var(--bg-ground)] border border-[var(--border-color)]">
-                <div className="space-y-0.5">
-                  <div className="font-bold text-[var(--text-primary)] text-xs flex items-center gap-1.5">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                    <span>Signed in as {driveUser.email}</span>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between p-3.5 rounded-xl bg-[var(--bg-ground)] border border-[var(--border-color)]">
+                  <div className="space-y-0.5">
+                    <div className="font-bold text-[var(--text-primary)] text-xs flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                      <span>Signed in as {driveUser.email}</span>
+                    </div>
+                    <p className="text-[11px] text-[var(--text-muted)]">
+                      EduKatalyst identity verified. {driveToken ? 'Google Drive upload permission granted.' : 'Google Drive API access token required for file uploads.'}
+                    </p>
                   </div>
-                  <p className="text-[11px] text-[var(--text-muted)]">
-                    EduKatalyst sync is active for your Google Drive "EduKatalyst Storage" folder.
-                  </p>
-                </div>
 
-                <button
-                  onClick={handleDisconnectDrive}
-                  className="px-3 py-1.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 border border-rose-500/30 text-rose-300 font-semibold text-xs flex items-center space-x-1.5 transition cursor-pointer"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                  <span>Sign Out</span>
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                
-                {/* Method Switcher Tabs */}
-                <div className="flex bg-[var(--bg-ground)] p-1 rounded-xl border border-[var(--border-color)]">
                   <button
-                    onClick={() => setAuthMode('signin')}
-                    className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition ${
-                      authMode === 'signin' 
-                        ? 'bg-[var(--accent-coral)] text-white dark:text-[#261619] shadow' 
-                        : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-                    }`}
+                    onClick={handleDisconnectDrive}
+                    className="px-3 py-1.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 border border-rose-500/30 text-rose-300 font-semibold text-xs flex items-center space-x-1.5 transition cursor-pointer"
                   >
-                    Google Sign-In Page
-                  </button>
-                  <button
-                    onClick={() => setAuthMode('token')}
-                    className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition ${
-                      authMode === 'token' 
-                        ? 'bg-[var(--accent-coral)] text-white dark:text-[#261619] shadow' 
-                        : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-                    }`}
-                  >
-                    Direct Access Token
+                    <LogOut className="w-3.5 h-3.5" />
+                    <span>Sign Out</span>
                   </button>
                 </div>
 
-                {authMode === 'signin' ? (
-                  <div className="space-y-3.5">
-                    <div className="space-y-1.5">
-                      <label className="text-[var(--text-primary)] font-bold text-xs flex items-center justify-between">
-                        <span>Google OAuth Client ID</span>
-                        <a 
-                          href="https://console.cloud.google.com/apis/credentials"
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-[var(--accent-peach)] hover:underline text-[11px] font-mono flex items-center gap-0.5"
-                        >
-                          <span>Get Client ID</span>
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
-                      </label>
-                      
-                      <div className="relative">
-                        <Key className="w-4 h-4 absolute left-3 top-2.5 text-[var(--text-muted)]" />
+                {!driveToken && (
+                  <div className="p-4 rounded-xl bg-amber-950/30 border border-amber-500/30 space-y-3 text-left">
+                    <div className="flex items-start space-x-2.5">
+                      <Key className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                      <div className="space-y-0.5">
+                        <h5 className="font-bold text-amber-300 text-xs font-heading">Google Drive Upload Access Token Required</h5>
+                        <p className="text-[11px] text-amber-200/80 leading-relaxed">
+                          Google Identity Sign-In verified your account profile. To upload videos and backup packages to Google Drive, paste a 1-click Access Token below:
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row items-center gap-2 pt-1">
+                      <a
+                        href="https://developers.google.com/oauthplayground/#step1&scopes=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive.file%20https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="w-full sm:w-auto px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs flex items-center justify-center space-x-1.5 transition cursor-pointer shrink-0"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>🔗 Get 1-Click Token</span>
+                      </a>
+
+                      <div className="flex space-x-2 flex-1 w-full">
                         <input
                           type="text"
-                          placeholder="e.g. 1234567890-abc.apps.googleusercontent.com"
-                          value={clientIdInput}
-                          onChange={(e) => setClientIdInput(e.target.value)}
-                          className="w-full bg-[var(--bg-ground)] border border-[var(--border-color)] rounded-xl pl-9 pr-3 py-2 text-xs text-[var(--text-primary)] font-mono placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-coral)] transition"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Origin Diagnostic Info Box */}
-                    <div className="p-3 rounded-xl bg-[var(--bg-ground)] border border-[var(--border-color)] text-[11px] font-mono space-y-1">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[var(--text-muted)]">Current Browser Origin:</span>
-                        <strong className="text-[var(--accent-coral)]">{window.location.origin}</strong>
-                      </div>
-                      <p className="text-[10px] text-[var(--text-muted)] leading-tight">
-                        Must match <strong>Authorized JavaScript origins</strong> in Google Cloud Console.
-                      </p>
-                    </div>
-
-                    {/* Primary Google Sign-In Buttons */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                      <button
-                        onClick={handleGoogleSignIn}
-                        disabled={isSigningInGoogle}
-                        className="py-2.5 px-3 rounded-xl bg-[var(--accent-coral)] text-white dark:text-[#261619] font-extrabold text-xs flex items-center justify-center space-x-1.5 transition shadow-md hover:opacity-90 disabled:opacity-50 cursor-pointer"
-                      >
-                        {isSigningInGoogle ? (
-                          <>
-                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                            <span>Connecting...</span>
-                          </>
-                        ) : (
-                          <>
-                            <GoogleIcon className="w-3.5 h-3.5" />
-                            <span>Sign In (Popup Window)</span>
-                          </>
-                        )}
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          const cId = clientIdInput.trim() || getStoredClientId();
-                          setStoredClientId(cId);
-                          redirectToGoogleOAuth(cId);
-                        }}
-                        className="py-2.5 px-3 rounded-xl bg-[var(--bg-ground)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border-color)] text-[var(--accent-peach)] font-bold text-xs flex items-center justify-center space-x-1.5 transition cursor-pointer"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5 text-[var(--accent-peach)]" />
-                        <span>Sign In (Direct Page)</span>
-                      </button>
-                    </div>
-
-                    {/* 3-Step Setup Guide Trigger */}
-                    <div className="pt-1">
-                      <button
-                        onClick={() => setShowSetupGuide(!showSetupGuide)}
-                        className="text-[var(--accent-peach)] hover:underline text-[11px] font-mono flex items-center gap-1 cursor-pointer"
-                      >
-                        <HelpCircle className="w-3.5 h-3.5" />
-                        <span>{showSetupGuide ? 'Hide 3-Step Setup Guide' : 'How to get a free Google OAuth Client ID (1 minute guide)'}</span>
-                      </button>
-
-                      {showSetupGuide && (
-                        <div className="mt-2.5 p-3.5 rounded-xl bg-[var(--bg-ground)] border border-[var(--border-color)] space-y-2 text-[11px] leading-relaxed">
-                          <div className="font-bold text-[var(--accent-coral)] flex items-center gap-1 font-heading">
-                            <span>Step-by-Step Google OAuth Setup:</span>
-                          </div>
-                          <ol className="list-decimal list-inside space-y-1.5 text-[var(--text-secondary)]">
-                            <li>
-                              Open <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer" className="text-[var(--accent-peach)] underline">Google Cloud Credentials</a>.
-                            </li>
-                            <li>
-                              Click <strong>Create Credentials</strong> → <strong>OAuth client ID</strong>. Select <strong>Web application</strong>.
-                            </li>
-                            <li>
-                              Under <strong>Authorized JavaScript origins</strong>, add: <code className="bg-[var(--bg-surface)] px-1.5 py-0.5 rounded border border-[var(--border-color)] text-[var(--accent-coral)]">{window.location.origin}</code>
-                            </li>
-                            <li>
-                              Copy the generated <strong>Client ID</strong> and paste it into the field above, then click <strong>Sign in with Google Account</strong>.
-                            </li>
-                          </ol>
-                        </div>
-                      )}
-                    </div>
-
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <div className="p-3.5 rounded-xl bg-[var(--bg-ground)] border border-[var(--border-color)] space-y-2">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                        <span className="font-bold text-[var(--text-primary)] text-xs font-heading">Need a 1-Click Access Token?</span>
-                        <a
-                          href="https://developers.google.com/oauthplayground/#step1&scopes=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive.file%20https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email"
-                          target="_blank"
-                          rel="noreferrer"
-                          className="px-3 py-1.5 rounded-lg bg-[var(--accent-coral)]/15 border border-[var(--accent-coral)]/30 text-[var(--accent-coral)] hover:bg-[var(--accent-coral)]/25 font-bold text-xs flex items-center gap-1.5 transition shrink-0"
-                        >
-                          <ExternalLink className="w-3.5 h-3.5" />
-                          <span>🔗 Get 1-Click Token (Google Playground)</span>
-                        </a>
-                      </div>
-                      <p className="text-[10px] text-[var(--text-muted)] leading-relaxed">
-                        Click the link → Click <strong>Authorize APIs</strong> → Click <strong>Exchange authorization code for tokens</strong> → Copy the Access Token (or Auth Code) and paste it below!
-                      </p>
-                    </div>
-
-                    <div className="flex space-x-2">
-                      <div className="relative flex-1">
-                        <Key className="w-4 h-4 absolute left-3 top-2.5 text-[var(--text-muted)]" />
-                        <input
-                          type="password"
-                          placeholder="ya29.a0x..."
+                          placeholder="Paste ya29... token here"
                           value={driveToken}
                           onChange={(e) => setDriveToken(e.target.value)}
-                          className="w-full bg-[var(--bg-ground)] border border-[var(--border-color)] rounded-xl pl-9 pr-3 py-2 text-xs text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--accent-coral)]"
+                          className="w-full bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-xl px-3 py-2 text-xs text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--accent-coral)] transition"
                         />
+                        <button
+                          onClick={handleSaveDriveToken}
+                          disabled={isVerifyingDrive || !driveToken}
+                          className="px-3.5 py-2 rounded-xl bg-[var(--accent-coral)] text-white dark:text-[#261619] font-extrabold text-xs flex items-center space-x-1 transition shrink-0 cursor-pointer disabled:opacity-50"
+                        >
+                          {isVerifyingDrive ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+                          <span>Verify</span>
+                        </button>
                       </div>
-                      <button
-                        onClick={handleSaveDriveToken}
-                        disabled={isVerifyingDrive}
-                        className="px-4 py-2 rounded-xl bg-[var(--accent-coral)] text-[#1D1214] font-bold text-xs flex items-center space-x-1.5 transition shrink-0 cursor-pointer"
-                      >
-                        {isVerifyingDrive ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
-                        <span>Verify Token</span>
-                      </button>
                     </div>
                   </div>
                 )}
+              </div>
+            ) : (
+              <div className="space-y-4 py-2 text-center flex flex-col items-center justify-center">
+                <p className="text-[11px] text-[var(--text-muted)] max-w-sm leading-relaxed">
+                  Sign in with your Google account to back up and publish video lectures, study materials, and quizzes.
+                </p>
 
+                <CleanGoogleSignInComponent
+                  onSuccessCredential={(userInfo) => {
+                    setDriveUser({
+                      email: userInfo.email,
+                      name: userInfo.name || userInfo.email,
+                      picture: userInfo.picture || ''
+                    });
+                    setStatusMsg({
+                      type: 'success',
+                      text: `Signed in as ${userInfo.name || userInfo.email} (${userInfo.email})!`
+                    });
+                  }}
+                  onError={(err) => {
+                    setStatusMsg({ type: 'error', text: err.message });
+                  }}
+                />
+
+                {/* 1-Click Drive Upload Authorization Token Box */}
+                <div className="w-full pt-2 text-left">
+                  <div className="p-4 rounded-xl bg-amber-950/30 border border-amber-500/30 space-y-3 max-w-md mx-auto">
+                    <div className="flex items-start space-x-2.5">
+                      <Key className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                      <div className="space-y-0.5">
+                        <h5 className="font-bold text-amber-300 text-xs font-heading">Authorize Google Drive File Uploads</h5>
+                        <p className="text-[11px] text-amber-200/80 leading-relaxed">
+                          To grant write permissions for Google Drive file uploads on localhost, get a 1-click token below:
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row items-center gap-2 pt-1">
+                      <a
+                        href="https://developers.google.com/oauthplayground/#step1&scopes=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive.file%20https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="w-full sm:w-auto px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs flex items-center justify-center space-x-1.5 transition cursor-pointer shrink-0"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>🔗 Get 1-Click Token</span>
+                      </a>
+
+                      <div className="flex space-x-2 flex-1 w-full">
+                        <div className="relative flex-1">
+                          <input
+                            type={showDriveTokenPass ? "text" : "password"}
+                            placeholder="Paste ya29... token here (Masked for Security)"
+                            value={driveToken}
+                            onChange={(e) => setDriveToken(e.target.value)}
+                            className="w-full bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-xl pl-3 pr-9 py-2 text-xs text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--accent-coral)] transition"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowDriveTokenPass(!showDriveTokenPass)}
+                            className="absolute right-2.5 top-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition cursor-pointer"
+                            title={showDriveTokenPass ? "Hide Access Token" : "Show Access Token"}
+                          >
+                            {showDriveTokenPass ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          </button>
+                        </div>
+
+                        <button
+                          onClick={handleSaveDriveToken}
+                          disabled={isVerifyingDrive || !driveToken}
+                          className="px-3.5 py-2 rounded-xl bg-[var(--accent-coral)] text-white dark:text-[#261619] font-extrabold text-xs flex items-center space-x-1 transition shrink-0 cursor-pointer disabled:opacity-50"
+                        >
+                          {isVerifyingDrive ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+                          <span>Verify</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
-
           </div>
 
-          {/* Drive Master Content Publishing Card */}
-          <div className="p-5 rounded-2xl bg-gradient-to-r from-[var(--accent-coral)]/10 via-[var(--bg-surface)] to-[var(--bg-surface)] border border-[var(--border-color)] space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--border-color)] pb-3">
+          {/* 3-Stage Publishing Architecture Card */}
+          <div className="p-5 rounded-3xl bg-gradient-to-br from-[var(--accent-coral)]/10 via-[var(--bg-surface)] to-[var(--bg-surface)] border border-[var(--border-color)] space-y-5 shadow-md">
+            
+            {/* Header & Flow Title */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--border-color)] pb-3.5">
               <div className="space-y-1">
-                <h4 className="font-bold text-[var(--text-primary)] text-sm flex items-center gap-2">
-                  <Upload className="w-4 h-4 text-[var(--accent-coral)]" />
-                  <span>Publish Study Materials to Official Google Drive</span>
-                </h4>
-                <p className="text-[11px] text-[var(--text-muted)]">
-                  Publish all videos, notes, quizzes, and subjects to the official Google Drive folder for instant visitor access.
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded-full bg-[var(--accent-coral)]/20 text-[var(--accent-coral)] text-[10px] font-mono font-bold border border-[var(--accent-coral)]/30">
+                    STAGE 1 ➔ STAGE 2 ➔ STAGE 3
+                  </span>
+                  <h4 className="font-extrabold text-[var(--text-primary)] text-sm font-heading">
+                    Master Cloud Sync & Website Publisher Pipeline
+                  </h4>
+                </div>
+                <p className="text-[11px] text-[var(--text-muted)] leading-relaxed">
+                  Accumulate videos, notes, and quizzes in local storage pool ➔ Sync compressed master library to Google Drive ➔ Sync Drive content to live website.
                 </p>
               </div>
 
-              <div className="flex items-center space-x-2 shrink-0">
+              {/* Action Buttons for Stage 2 & Stage 3 */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full sm:w-auto shrink-0">
                 <button
-                  onClick={handleRunDriveIntegrationTest}
-                  disabled={isProcessing}
-                  className="px-3 py-2.5 rounded-xl bg-[var(--bg-ground)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border-color)] text-[var(--accent-peach)] font-bold text-xs flex items-center space-x-1.5 transition shrink-0 disabled:opacity-50 cursor-pointer"
+                  onClick={handleUploadMasterZipToDrive}
+                  disabled={isProcessing || sessions.length === 0}
+                  className="px-4 py-2.5 rounded-xl bg-[var(--accent-coral)] text-white dark:text-[#261619] font-extrabold text-xs flex items-center justify-center space-x-2 transition shadow-lg hover:opacity-90 disabled:opacity-50 cursor-pointer"
+                  title="Upload all accumulated local storage files to Google Drive Master Pool"
                 >
-                  <Sparkles className="w-4 h-4 text-[var(--accent-peach)]" />
-                  <span>🧪 Test Upload & Download</span>
+                  <Upload className="w-4 h-4" />
+                  <span>🚀 Sync Storage to Drive</span>
                 </button>
 
-                {sessions.length > 0 && (
-                  <button
-                    onClick={handleUploadMasterZipToDrive}
-                    disabled={isProcessing}
-                    className="px-4 py-2.5 rounded-xl bg-[var(--accent-coral)] text-white dark:text-[#261619] font-extrabold text-xs flex items-center space-x-2 transition shadow-lg hover:opacity-90 shrink-0 disabled:opacity-50 cursor-pointer"
-                  >
-                    <Upload className="w-4 h-4" />
-                    <span>🚀 Publish All Master Content to Official Drive</span>
-                  </button>
-                )}
+                <button
+                  onClick={handleSyncDriveToWebsite}
+                  disabled={isProcessing}
+                  className="px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs flex items-center justify-center space-x-2 transition shadow-lg disabled:opacity-50 cursor-pointer"
+                  title="Download and sync latest Google Drive master library to live website content"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isProcessing ? 'animate-spin' : ''}`} />
+                  <span>🌐 Sync Drive to Website</span>
+                </button>
               </div>
             </div>
 
-            {/* Content Type Statistics Badges */}
-            <div className="flex flex-wrap items-center gap-2 pt-1">
-              <span className="px-2.5 py-1 rounded-lg bg-[var(--bg-ground)] border border-[var(--border-color)] text-[11px] font-mono text-[var(--text-secondary)] flex items-center gap-1.5">
-                <span>📹 Videos:</span>
-                <strong className="text-[var(--accent-coral)] font-bold">
-                  {sessions.filter(s => !s.id.startsWith('note_') && !s.id.startsWith('quiz_')).length}
-                </strong>
-              </span>
+            {/* STAGE 1: Accumulated Local Storage Pool */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h5 className="font-bold text-xs font-heading text-[var(--text-primary)] flex items-center gap-2">
+                  <HardDrive className="w-4 h-4 text-[var(--accent-coral)]" />
+                  <span>Stage 1: Accumulated Local Storage Pool ({sessions.length} items)</span>
+                </h5>
 
-              <span className="px-2.5 py-1 rounded-lg bg-[var(--bg-ground)] border border-[var(--border-color)] text-[11px] font-mono text-[var(--text-secondary)] flex items-center gap-1.5">
-                <span>📝 Notes:</span>
-                <strong className="text-[var(--accent-peach)] font-bold">
-                  {sessions.filter(s => s.id.startsWith('note_')).length}
-                </strong>
-              </span>
-
-              <span className="px-2.5 py-1 rounded-lg bg-[var(--bg-ground)] border border-[var(--border-color)] text-[11px] font-mono text-[var(--text-secondary)] flex items-center gap-1.5">
-                <span>❓ Quizzes:</span>
-                <strong className="text-emerald-400 font-bold">
-                  {sessions.filter(s => s.id.startsWith('quiz_')).length}
-                </strong>
-              </span>
-            </div>
+                {/* Content Type Statistics Badges */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="px-2.5 py-0.5 rounded-lg bg-[var(--bg-ground)] border border-[var(--border-color)] text-[10.5px] font-mono text-[var(--text-secondary)]">
+                    📹 Videos: <strong className="text-[var(--accent-coral)]">{sessions.filter(s => !s.id.startsWith('note_') && !s.id.startsWith('quiz_')).length}</strong>
+                  </span>
+                  <span className="px-2.5 py-0.5 rounded-lg bg-[var(--bg-ground)] border border-[var(--border-color)] text-[10.5px] font-mono text-[var(--text-secondary)]">
+                    📝 Notes: <strong className="text-[var(--accent-peach)]">{sessions.filter(s => s.id.startsWith('note_')).length}</strong>
+                  </span>
+                  <span className="px-2.5 py-0.5 rounded-lg bg-[var(--bg-ground)] border border-[var(--border-color)] text-[10.5px] font-mono text-[var(--text-secondary)]">
+                    ❓ Quizzes: <strong className="text-emerald-400">{sessions.filter(s => s.id.startsWith('quiz_')).length}</strong>
+                  </span>
+                </div>
+              </div>
 
             {sessions.length === 0 ? (
               <p className="text-[var(--text-muted)] text-[11px] py-2">
@@ -891,6 +1034,7 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
               </div>
             )}
           </div>
+        </div>
 
           {/* Google Drive Stored Files */}
           {driveUser && (
@@ -973,12 +1117,20 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
                 <div className="relative flex-1">
                   <Key className="w-4 h-4 absolute left-3 top-3 text-[var(--text-muted)]" />
                   <input
-                    type="password"
-                    placeholder="ghp_..."
+                    type={showGithubTokenPass ? "text" : "password"}
+                    placeholder="ghp_... (Masked for Security)"
                     value={githubToken}
                     onChange={(e) => setGithubToken(e.target.value)}
-                    className="w-full bg-[var(--bg-ground)] border border-[var(--border-color)] rounded-xl pl-9 pr-4 py-2.5 text-[var(--text-primary)] font-mono placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-coral)]"
+                    className="w-full bg-[var(--bg-ground)] border border-[var(--border-color)] rounded-xl pl-9 pr-10 py-2.5 text-[var(--text-primary)] font-mono placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-coral)]"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowGithubTokenPass(!showGithubTokenPass)}
+                    className="absolute right-3 top-3 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition cursor-pointer"
+                    title={showGithubTokenPass ? "Hide GitHub Token" : "Show GitHub Token"}
+                  >
+                    {showGithubTokenPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
                 </div>
                 <button
                   onClick={handleSaveGithubToken}
@@ -1104,6 +1256,72 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
             </div>
           )}
 
+        </div>
+      )}
+
+      {/* 🔐 Master Creator Passcode Lock Modal */}
+      {passcodeModalOpen && (
+        <div className="fixed inset-0 z-[110] bg-black/70 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-md bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-3xl p-6 shadow-2xl space-y-4 relative text-left">
+            <div className="flex items-center justify-between border-b border-[var(--border-color)] pb-3">
+              <div className="flex items-center space-x-2.5">
+                <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-[var(--text-primary)] text-sm font-heading">Master Storage Security Lock</h3>
+                  <p className="text-[11px] text-[var(--text-muted)] font-sans">Enter Creator Passcode to publish to Master Drive Pool</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setPasscodeModalOpen(false)}
+                className="p-1.5 rounded-full hover:bg-[var(--bg-ground)] text-[var(--text-muted)] transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleVerifyPasscode} className="space-y-4 pt-1">
+              <div className="space-y-1.5 text-left">
+                <label className="text-xs font-bold text-[var(--text-secondary)] font-heading flex items-center gap-1.5">
+                  <Key className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Master Creator Passcode</span>
+                </label>
+                <input
+                  type="password"
+                  autoFocus
+                  placeholder="Enter Master Creator Passcode"
+                  value={passcodeInput}
+                  onChange={(e) => setPasscodeInput(e.target.value)}
+                  className="w-full bg-[var(--bg-ground)] border border-[var(--border-color)] rounded-xl px-4 py-2.5 text-xs text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--accent-coral)] transition"
+                />
+                {passcodeError ? (
+                  <p className="text-[11px] text-rose-400 font-medium">{passcodeError}</p>
+                ) : (
+                  <p className="text-[10.5px] text-[var(--text-muted)]">
+                    Enter your administrator passcode to grant upload access.
+                  </p>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end space-x-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setPasscodeModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-[var(--bg-ground)] hover:bg-[var(--bg-surface)] text-[var(--text-secondary)] font-bold text-xs transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-[var(--accent-coral)] hover:opacity-95 text-white dark:text-[#261619] font-extrabold text-xs flex items-center space-x-1.5 transition shadow-sm cursor-pointer"
+                >
+                  <Lock className="w-3.5 h-3.5" />
+                  <span>Unlock & Publish</span>
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 

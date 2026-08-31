@@ -7,6 +7,9 @@ import { isCreatorAuthenticated } from '../utils/auth';
 import { initTheme, setStoredPreset } from '../utils/theme';
 import { initPWA } from '../utils/pwaHelper';
 
+import { getStoredDriveToken, listDriveBackups, downloadFromDrive } from '../utils/googleDriveSync';
+import { importSessionFromZip } from '../utils/zipHelper';
+
 const AppShellContext = createContext(null);
 
 export function AppShellProvider({ children }) {
@@ -18,7 +21,23 @@ export function AppShellProvider({ children }) {
 
   const refreshSessions = useCallback(async () => {
     try {
-      const list = await getAllVideoSessions();
+      let list = await getAllVideoSessions();
+      if ((!list || list.length === 0) && typeof window !== 'undefined') {
+        try {
+          const driveToken = getStoredDriveToken();
+          if (driveToken) {
+            const files = await listDriveBackups(driveToken);
+            if (files && files.length > 0) {
+              const latestMasterFile = files[0];
+              const blob = await downloadFromDrive(latestMasterFile.id, driveToken);
+              await importSessionFromZip(blob);
+              list = await getAllVideoSessions();
+            }
+          }
+        } catch (syncErr) {
+          console.warn('[AppShellContext] Initial cloud sync notice:', syncErr);
+        }
+      }
       setSessions(list || []);
     } catch (err) {
       console.error('[AppShellContext] Error fetching video sessions:', err);
