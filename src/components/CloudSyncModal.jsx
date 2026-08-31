@@ -223,7 +223,22 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
       setDriveToken(newToken);
       await handleTestDrive(newToken);
     } catch (err) {
-      if (err.message.includes('400') || err.message.includes('origin_mismatch') || err.message.includes('origin')) {
+      if (err.message.includes('Google Drive API is disabled') || err.message.includes('has not been used in project')) {
+        setStatusMsg({ 
+          type: 'error', 
+          text: 'Google Drive API is disabled in your Google Cloud Console project. Click the link below to enable Google Drive API for your project in 1 click.',
+          link: 'https://console.cloud.google.com/apis/library/drive.googleapis.com',
+          linkText: 'Enable Google Drive API'
+        });
+      } else if (err.message.includes('403') || err.message.includes('access_denied')) {
+        setStatusMsg({ 
+          type: 'error', 
+          text: 'Google OAuth Error 403 (access_denied): Your app is in Testing status. Add your email address to "Test users" in Google Cloud OAuth Consent Screen, or click "Publish App" to make it public.',
+          link: 'https://console.cloud.google.com/apis/credentials/consent',
+          linkText: 'Open OAuth Consent Screen'
+        });
+        setShowSetupGuide(true);
+      } else if (err.message.includes('400') || err.message.includes('origin_mismatch') || err.message.includes('origin')) {
         setStatusMsg({ 
           type: 'error', 
           text: `Google OAuth Error 400 (origin_mismatch): Your browser is accessing "${window.location.origin}". Add "${window.location.origin}" to Authorized JavaScript origins in Google Cloud Console, or open "http://localhost:5173" in your browser.`,
@@ -240,7 +255,7 @@ export default function CloudSyncModal({ sessions = [], onRefreshSessions }) {
         });
         setShowSetupGuide(true);
       } else {
-        setStatusMsg({ type: 'error', text: `Google Sign-In Failed: ${err.message}` });
+        setStatusMsg({ type: 'error', text: `Google Sign-In Error: ${err.message}` });
       }
     } finally {
       setIsSigningInGoogle(false);

@@ -61,7 +61,8 @@ export async function validateDriveToken(accessToken) {
 
   const response = await fetch(`https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${encodeURIComponent(token)}`);
   if (!response.ok) {
-    throw new Error('Invalid or expired Google Drive Access Token. Please sign in again.');
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error_description || errData.error || 'Invalid or expired Google Drive Access Token. Please sign in again.');
   }
 
   const data = await response.json();
@@ -112,7 +113,7 @@ export function loadGoogleGsiScript() {
     script.async = true;
     script.defer = true;
     script.onload = () => resolve(window.google?.accounts?.oauth2);
-    script.onerror = (err) => reject(new Error('Failed to load Google Identity Services SDK'));
+    script.onerror = () => reject(new Error('Failed to load Google Identity Services SDK'));
     document.head.appendChild(script);
   });
 }
@@ -150,7 +151,6 @@ export async function promptGoogleDriveSignIn(customClientId = '') {
       tokenClient.requestAccessToken();
     });
   } catch (err) {
-    // Fallback: standard popup window if GIS SDK fails to initialize
     return openGoogleOAuthPopupFallback(clientId);
   }
 }
@@ -223,7 +223,12 @@ export async function ensureDriveAppFolder(token) {
   });
 
   if (!searchRes.ok) {
-    throw new Error(`Google Drive Search Failed: ${searchRes.statusText}`);
+    const errData = await searchRes.json().catch(() => ({}));
+    const detailMsg = errData.error?.message || searchRes.statusText || 'Unknown Google Drive API error';
+    if (detailMsg.includes('disabled') || detailMsg.includes('has not been used in project')) {
+      throw new Error(`Google Drive API is disabled in your Google Cloud Console project. Enable it at https://console.cloud.google.com/apis/library/drive.googleapis.com`);
+    }
+    throw new Error(`Google Drive API Error (${searchRes.status}): ${detailMsg}`);
   }
 
   const searchData = await searchRes.json();
@@ -245,7 +250,8 @@ export async function ensureDriveAppFolder(token) {
   });
 
   if (!createRes.ok) {
-    throw new Error(`Failed to create Google Drive folder: ${createRes.statusText}`);
+    const errData = await createRes.json().catch(() => ({}));
+    throw new Error(`Failed to create Google Drive folder: ${errData.error?.message || createRes.statusText}`);
   }
 
   const folderData = await createRes.json();
@@ -299,22 +305,20 @@ export async function listDriveBackups(token) {
   const accessToken = token || getStoredDriveToken();
   if (!accessToken) return [];
 
-  try {
-    const folderId = await ensureDriveAppFolder(accessToken);
-    const query = encodeURIComponent(`'${folderId}' in parents and trashed = false`);
-    
-    const response = await fetch(`https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,mimeType,createdTime,size)&orderBy=createdTime desc`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
+  const folderId = await ensureDriveAppFolder(accessToken);
+  const query = encodeURIComponent(`'${folderId}' in parents and trashed = false`);
+  
+  const response = await fetch(`https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,mimeType,createdTime,size)&orderBy=createdTime desc`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
 
-    if (!response.ok) return [];
-
-    const data = await response.json();
-    return data.files || [];
-  } catch (err) {
-    console.error('Error listing Drive backups:', err);
-    return [];
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(`List Drive Backups Failed: ${errData.error?.message || response.statusText}`);
   }
+
+  const data = await response.json();
+  return data.files || [];
 }
 
 /**
@@ -329,7 +333,8 @@ export async function downloadFromDrive(fileId, token) {
   });
 
   if (!response.ok) {
-    throw new Error(`Failed to download file from Google Drive: ${response.statusText}`);
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(`Failed to download file from Google Drive: ${errData.error?.message || response.statusText}`);
   }
 
   return await response.blob();
