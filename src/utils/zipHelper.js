@@ -345,3 +345,23 @@ async function importMasterBundleFromZip(zip, manifestFile) {
     title: `Master Archive (${importedSessions.length} Sessions)`
   };
 }
+
+/**
+ * Convenience alias for exporting all master storage sessions to a Zip Blob
+ */
+export async function exportMasterStorageZip() {
+  const sessions = await getAllVideoSessions();
+  let resultBlob = null;
+  await exportMasterBundle(sessions, (blob) => {
+    resultBlob = blob;
+  });
+  return resultBlob;
+}
+
+/**
+ * Convenience alias for importing sessions from a Zip file or Blob
+ */
+export async function importMasterStorageZip(zipFile) {
+  return await importSessionFromZip(zipFile);
+}
+

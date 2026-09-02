@@ -47,5 +47,10 @@ export default defineConfig({
   },
   optimizeDeps: {
     exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util']
+  },
+  test: {
+    environment: 'jsdom',
+    globals: true
   }
 });
+

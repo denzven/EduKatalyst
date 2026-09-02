@@ -55,8 +55,11 @@ export function resolveMediaUrls(markdownText, mediaAssets = {}) {
   return resolved;
 }
 
+import DOMPurify from 'dompurify';
+
 /**
- * Rich Markdown to HTML Converter with Support for Codelets, Images, GIFs, Videos, and Callouts
+ * Rich Markdown to HTML Converter with Support for Codelets, Images, GIFs, Videos, and Callouts.
+ * Sanitized via DOMPurify to prevent XSS script injection and remove inline event handlers.
  */
 export function compileMarkdown(markdownText) {
   if (!markdownText) return '';
@@ -79,7 +82,7 @@ export function compileMarkdown(markdownText) {
         </figcaption>
       </figure>`;
     })
-    // Codelet Blocks ```lang ... ```
+    // Codelet Blocks ```lang ... ``` (Inline onclick handler removed per security constitution)
     .replace(/```([a-z0-9+#]*)\s*([\s\S]*?)```/gim, (match, lang, code) => {
       const displayLang = (lang || 'codelet').toUpperCase();
       const escapedCode = code.trim().replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -91,10 +94,6 @@ export function compileMarkdown(markdownText) {
             <span class="w-2.5 h-2.5 rounded-full bg-[#6EB88F]"></span>
             <span class="text-[10px] font-mono font-bold text-[#D49A6A] uppercase ml-2 tracking-wider">Codelet • ${displayLang}</span>
           </div>
-          <button onclick="navigator.clipboard.writeText(this.nextElementSibling.innerText)" class="text-[10px] font-mono font-bold text-[#A0AAB2] hover:text-[#E4E6EB] px-2 py-0.5 rounded bg-[#272B33] border border-[#343842] transition">
-            Copy Codelet
-          </button>
-          <span className="hidden"></span>
         </div>
         <pre class="p-4 font-mono text-xs text-[#D49A6A] formula-scroll-container leading-relaxed overflow-x-auto"><code>${escapedCode}</code></pre>
       </div>`;
@@ -121,7 +120,15 @@ export function compileMarkdown(markdownText) {
     // Line breaks
     .replace(/\n\n/g, '<br/>');
 
-  return html;
+  // DOMPurify Sanitization: Strip dangerous elements/attributes (onclick, script, javascript: URIs)
+  return DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: [
+      'h1', 'h2', 'h3', 'p', 'span', 'div', 'strong', 'em', 'code', 'pre',
+      'ul', 'ol', 'li', 'blockquote', 'figure', 'figcaption', 'img', 'video', 'source', 'br'
+    ],
+    ALLOWED_ATTR: ['src', 'alt', 'class', 'href', 'target', 'controls', 'preload']
+    // NOTE: 'onclick' is explicitly EXCLUDED from allowed attributes!
+  });
 }
 
 /**

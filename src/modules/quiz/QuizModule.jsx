@@ -4,12 +4,24 @@ import { motion } from 'framer-motion';
 import confetti from 'canvas-confetti';
 import { loadMarkdownQuizzes } from '../../utils/markdownParser';
 import { useAppShell } from '../../core/AppShellContext';
+import { saveQuizAttempt, getQuizAttemptHistory } from '../../utils/quizStorage';
 
 export default function QuizModule({ selectedSubject = 'All', selectedTag = 'All', searchQuery = '' }) {
   const { eventMediator } = useAppShell();
-  const [quizAnswers, setQuizAnswers] = useState({});
+  const [quizAnswers, setQuizAnswers] = useState(() => {
+    const history = getQuizAttemptHistory();
+    const initial = {};
+    Object.keys(history).forEach((qId) => {
+      const attempts = history[qId];
+      if (attempts && attempts.length > 0 && attempts[0].userAnswers) {
+        Object.assign(initial, attempts[0].userAnswers);
+      }
+    });
+    return initial;
+  });
 
   const markdownQuizzes = useMemo(() => loadMarkdownQuizzes(), []);
+  const attemptHistory = useMemo(() => getQuizAttemptHistory(), [quizAnswers]);
 
   // Filter quizzes by subject, tag, and search query
   const filteredQuizzes = useMemo(() => {
@@ -48,7 +60,11 @@ export default function QuizModule({ selectedSubject = 'All', selectedTag = 'All
 
   const handleQuizSelect = (quizId, optionIndex, correctIndex) => {
     const isCorrect = optionIndex === correctIndex;
-    setQuizAnswers((prev) => ({ ...prev, [quizId]: optionIndex }));
+    const updatedAnswers = { ...quizAnswers, [quizId]: optionIndex };
+    setQuizAnswers(updatedAnswers);
+
+    // Save score attempt locally
+    saveQuizAttempt(quizId, isCorrect ? 1 : 0, 1, updatedAnswers);
 
     if (isCorrect) {
       confetti({
@@ -68,6 +84,7 @@ export default function QuizModule({ selectedSubject = 'All', selectedTag = 'All
       });
     }
   };
+
 
   const handleResetQuiz = () => {
     setQuizAnswers({});

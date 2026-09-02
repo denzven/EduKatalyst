@@ -21,7 +21,8 @@ import { encryptAndChunkVideo, validateVideoFile } from '../utils/ffmpegHelper';
 import { saveVideoSession } from '../utils/storage';
 import { exportSessionToZip, importSessionFromZip } from '../utils/zipHelper';
 import { aggregateAllSubjects, registerSubject } from '../utils/taxonomyController';
-import { getStoredDriveToken, uploadZipToDrive } from '../utils/googleDriveSync';
+import backupService from '../services/BackupService';
+import contentService from '../services/contentService';
 
 export default function VideoUploader({ onSessionCreated, onSelectSessionForPlayer }) {
   const [selectedFile, setSelectedFile] = useState(null);
@@ -46,21 +47,65 @@ export default function VideoUploader({ onSessionCreated, onSelectSessionForPlay
 
   const handlePublishToDrive = async () => {
     if (!resultSession) return;
-    const token = getStoredDriveToken();
-    if (!token) {
+    if (!backupService.hasDriveToken()) {
       alert('Google Drive authorization required. Please sign in with Google in Cloud Sync tab first.');
       return;
     }
 
     setIsPublishingDrive(true);
-    setDrivePublishStatus('Uploading to Google Drive...');
+    setDrivePublishStatus('Publishing individual HLS files to Google Drive...');
     try {
+      const categorySlug = (resultSession.category || 'general').toLowerCase().replace(/[^a-z0-9]/gi, '_');
+      const sessionSlug = resultSession.id || `session_${Date.now()}`;
+      const basePath = `courses/${categorySlug}/lessons/${sessionSlug}/video`;
+      const assetFileIds = {};
+
+      // 1. Upload playlist file
+      if (resultSession.playlistText) {
+        const playlistRecord = await contentService.publishContentFile(`${basePath}/master.m3u8`, resultSession.playlistText, 'application/x-mpegurl');
+        if (playlistRecord?.fileId) {
+          assetFileIds['master.m3u8'] = playlistRecord.fileId;
+          assetFileIds[`${basePath}/master.m3u8`] = playlistRecord.fileId;
+        }
+      }
+
+      // 2. Upload key file if exists
+      if (resultSession.keyBlob) {
+        const keyRecord = await contentService.publishContentFile(`${basePath}/enc.key`, resultSession.keyBlob, 'application/octet-stream');
+        if (keyRecord?.fileId) {
+          assetFileIds['enc.key'] = keyRecord.fileId;
+          assetFileIds[`${basePath}/enc.key`] = keyRecord.fileId;
+        }
+      }
+
+      // 3. Upload individual video segment files
+      const segments = resultSession.segments || {};
+      for (const segName of Object.keys(segments)) {
+        const segBlob = segments[segName];
+        if (segBlob) {
+          const segRecord = await contentService.publishContentFile(`${basePath}/${segName}`, segBlob, 'video/mp2t');
+          if (segRecord?.fileId) {
+            assetFileIds[segName] = segRecord.fileId;
+            assetFileIds[`${basePath}/${segName}`] = segRecord.fileId;
+          }
+        }
+      }
+
+      // 4. Update session record with asset file IDs
+      resultSession.assetFileIds = assetFileIds;
+      resultSession.playlistFileId = assetFileIds['master.m3u8'];
+      resultSession.remotePath = basePath;
+      await saveVideoSession(resultSession);
+
+      // 5. Upload full ZIP backup package for backup/restore
       const zipFilename = `${resultSession.title.replace(/[^a-z0-9]/gi, '_')}_hls_bundle.zip`;
       await exportSessionToZip(resultSession, async (blob) => {
-        await uploadZipToDrive(blob, zipFilename, token);
-        setDrivePublishStatus(`Published "${resultSession.title}" to Google Drive successfully!`);
+        await backupService.exportBackup(blob, zipFilename);
       });
+
+      setDrivePublishStatus(`Published "${resultSession.title}" with stored Google Drive File IDs to cloud catalog!`);
     } catch (err) {
+      console.error('[VideoUploader] Drive publish error:', err);
       setDrivePublishStatus(`Publish failed: ${err.message}`);
     } finally {
       setIsPublishingDrive(false);

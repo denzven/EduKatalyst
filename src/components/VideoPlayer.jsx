@@ -20,7 +20,60 @@ import {
   Tv2
 } from 'lucide-react';
 
+import assetDeliveryService from '../services/assets/AssetDeliveryService';
+
+import contentService from '../services/contentService';
+
 const SPEED_OPTIONS = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
+
+class CustomFragmentLoader {
+  constructor(config) {
+    this.stats = { trequest: performance.now(), retry: 0 };
+  }
+  destroy() {}
+  abort() {}
+  load(context, config, callbacks) {
+    const rawUrl = context.url;
+    if (rawUrl.startsWith('blob:')) {
+      fetch(rawUrl)
+        .then((res) => res.arrayBuffer())
+        .then((buf) => {
+          const now = performance.now();
+          callbacks.onSuccess(
+            { url: rawUrl, data: buf },
+            { trequest: this.stats.trequest, tfirst: now, tload: now, loaded: buf.byteLength, total: buf.byteLength },
+            context
+          );
+        })
+        .catch((err) => callbacks.onError({ code: 404, text: err.message }, context));
+      return;
+    }
+
+    let assetPath = rawUrl;
+    let fileId = null;
+
+    try {
+      const parsed = new URL(rawUrl, 'http://localhost');
+      fileId = parsed.searchParams.get('fileId');
+      assetPath = parsed.pathname.startsWith('/') ? parsed.pathname.slice(1) : parsed.pathname;
+    } catch {}
+
+    contentService.getAssetBlob(assetPath, 'video/mp2t', fileId)
+      .then((blob) => blob.arrayBuffer())
+      .then((arrayBuffer) => {
+        const now = performance.now();
+        callbacks.onSuccess(
+          { url: context.url, data: arrayBuffer },
+          { trequest: this.stats.trequest, tfirst: now, tload: now, loaded: arrayBuffer.byteLength, total: arrayBuffer.byteLength },
+          context
+        );
+      })
+      .catch((err) => {
+        console.error('[VideoPlayer] On-demand segment load error:', err);
+        callbacks.onError({ code: 404, text: err.message }, context);
+      });
+  }
+}
 
 export default function VideoPlayer({ session }) {
   const videoRef = useRef(null);
@@ -45,74 +98,72 @@ export default function VideoPlayer({ session }) {
   const [rawSegmentUrl, setRawSegmentUrl] = useState(null);
   const [rawErrorMsg, setRawErrorMsg] = useState(null);
 
-  const blobUrlsRef = useRef([]);
+  const cleanupRef = useRef(null);
 
   useEffect(() => {
     if (!session || !videoRef.current) return;
 
-    blobUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
-    blobUrlsRef.current = [];
+    if (cleanupRef.current) {
+      cleanupRef.current();
+      cleanupRef.current = null;
+    }
 
     if (hlsRef.current) {
       hlsRef.current.destroy();
       hlsRef.current = null;
     }
 
-    try {
-      const keyBlobUrl = URL.createObjectURL(session.keyBlob);
-      blobUrlsRef.current.push(keyBlobUrl);
+    let isSubscribed = true;
 
-      const segmentBlobUrls = {};
-      const segmentNames = Object.keys(session.segments || {});
+    async function loadSource() {
+      try {
+        const { playlistBlobUrl, firstSegmentUrl, cleanup } = await assetDeliveryService.getPlaybackSource(session);
+        if (!isSubscribed) {
+          cleanup();
+          return;
+        }
 
-      segmentNames.forEach(segName => {
-        const segBlob = session.segments[segName];
-        const segUrl = URL.createObjectURL(segBlob);
-        segmentBlobUrls[segName] = segUrl;
-        blobUrlsRef.current.push(segUrl);
-      });
+        cleanupRef.current = cleanup;
+        if (firstSegmentUrl) {
+          setRawSegmentUrl(firstSegmentUrl);
+        }
 
-      if (segmentNames.length > 0) {
-        setRawSegmentUrl(segmentBlobUrls[segmentNames[0]]);
+        if (Hls.isSupported()) {
+          const hls = new Hls({
+            enableWorker: false,
+            fLoader: CustomFragmentLoader,
+          });
+          hlsRef.current = hls;
+
+          hls.loadSource(playlistBlobUrl);
+          hls.attachMedia(videoRef.current);
+
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            if (videoRef.current) {
+              setDuration(videoRef.current.duration || 0);
+              videoRef.current.playbackRate = playbackSpeed;
+            }
+          });
+        } else if (videoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
+          videoRef.current.src = playlistBlobUrl;
+        }
+      } catch (err) {
+        console.error('[VideoPlayer] Player setup error:', err);
       }
-
-      let playlistText = session.playlistText || '';
-      const keyPattern = new RegExp(`URI=["']?${session.keyUri.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["']?`, 'g');
-      playlistText = playlistText.replace(keyPattern, `URI="${keyBlobUrl}"`);
-      playlistText = playlistText.replace(/URI="enc\.key"/g, `URI="${keyBlobUrl}"`);
-
-      segmentNames.forEach(segName => {
-        playlistText = playlistText.replace(new RegExp(segName, 'g'), segmentBlobUrls[segName]);
-      });
-
-      const playlistBlob = new Blob([playlistText], { type: 'application/x-mpegurl' });
-      const playlistBlobUrl = URL.createObjectURL(playlistBlob);
-      blobUrlsRef.current.push(playlistBlobUrl);
-
-      if (Hls.isSupported()) {
-        const hls = new Hls({ enableWorker: true });
-        hlsRef.current = hls;
-
-        hls.loadSource(playlistBlobUrl);
-        hls.attachMedia(videoRef.current);
-
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          if (videoRef.current) {
-            setDuration(videoRef.current.duration || 0);
-            videoRef.current.playbackRate = playbackSpeed;
-          }
-        });
-
-      } else if (videoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
-        videoRef.current.src = playlistBlobUrl;
-      }
-
-    } catch (err) {
-      console.error('Player setup error:', err);
     }
 
+    loadSource();
+
     return () => {
-      if (hlsRef.current) hlsRef.current.destroy();
+      isSubscribed = false;
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+      if (cleanupRef.current) {
+        cleanupRef.current();
+        cleanupRef.current = null;
+      }
     };
   }, [session]);
 

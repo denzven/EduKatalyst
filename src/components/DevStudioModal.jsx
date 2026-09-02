@@ -271,8 +271,10 @@ export default function DevStudioModal({
                 <CloudSyncModal
                   sessions={sessions}
                   onRefreshSessions={onRefreshSessions}
+                  isInline={true}
                 />
               )}
+
 
             </div>
 

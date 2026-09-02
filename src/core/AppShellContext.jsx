@@ -2,19 +2,20 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { eventMediator } from './EventMediator';
 import { moduleRegistry } from './ModuleRegistry';
 import { parseHash, navigateTo, subscribeToHash } from '../utils/router';
-import { getAllVideoSessions } from '../utils/storage';
+import { getAllVideoSessions, initStorageQuota, enforceVideoCacheLimit, subscribeToStorageChannel } from '../utils/storage';
 import { isCreatorAuthenticated } from '../utils/auth';
 import { initTheme, setStoredPreset } from '../utils/theme';
 import { initPWA } from '../utils/pwaHelper';
 
-import { getStoredDriveToken, listDriveBackups, downloadFromDrive } from '../utils/googleDriveSync';
-import { importSessionFromZip } from '../utils/zipHelper';
+import backupService from '../services/BackupService';
+import contentService from '../services/contentService';
 
 const AppShellContext = createContext(null);
 
 export function AppShellProvider({ children }) {
   const [currentPreset, setCurrentPresetState] = useState(() => initTheme());
   const [sessions, setSessions] = useState([]);
+  const [manifest, setManifest] = useState(null);
   const [isCreatorAuth, setIsCreatorAuth] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [routeState, setRouteState] = useState(() => parseHash());
@@ -23,24 +24,15 @@ export function AppShellProvider({ children }) {
     try {
       let list = await getAllVideoSessions();
       if ((!list || list.length === 0) && typeof window !== 'undefined') {
-        try {
-          const driveToken = getStoredDriveToken();
-          if (driveToken) {
-            const files = await listDriveBackups(driveToken);
-            if (files && files.length > 0) {
-              const latestMasterFile = files[0];
-              const blob = await downloadFromDrive(latestMasterFile.id, driveToken);
-              await importSessionFromZip(blob);
-              list = await getAllVideoSessions();
-            }
-          }
-        } catch (syncErr) {
-          console.warn('[AppShellContext] Initial cloud sync notice:', syncErr);
-        }
+        list = await backupService.autoRestoreLatestBackup();
       }
       setSessions(list || []);
+
+      // Load course catalog manifest using cache-first contentService
+      const manifestData = await contentService.getManifest();
+      setManifest(manifestData);
     } catch (err) {
-      console.error('[AppShellContext] Error fetching video sessions:', err);
+      console.error('[AppShellContext] Error fetching sessions/manifest:', err);
     }
   }, []);
 
@@ -57,7 +49,10 @@ export function AppShellProvider({ children }) {
   useEffect(() => {
     initTheme();
     initPWA();
+    initStorageQuota();
+    enforceVideoCacheLimit();
     refreshSessions();
+
     setIsCreatorAuth(isCreatorAuthenticated());
 
     // Initialize all registered modules with orchestrator API
@@ -72,8 +67,14 @@ export function AppShellProvider({ children }) {
       window.scrollTo(0, 0);
     });
 
+    const unsubscribeStorage = subscribeToStorageChannel(() => {
+      console.info('[AppShellContext] Cross-tab storage update triggered refresh');
+      refreshSessions();
+    });
+
     return () => {
       unsubscribeHash();
+      unsubscribeStorage();
     };
   }, [refreshSessions, handleNavigate]);
 
@@ -84,6 +85,7 @@ export function AppShellProvider({ children }) {
     routeParams: routeState.params,
     navigateToTab: handleNavigate,
     sessions,
+    manifest,
     refreshSessions,
     isCreatorAuth,
     setIsCreatorAuth,

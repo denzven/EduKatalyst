@@ -1,0 +1,42 @@
+{
+  "version": "2026.09.01",
+  "generatedAt": "2026-09-01T20:00:00Z",
+  "subjects": [
+    "Physics",
+    "Mathematics",
+    "Computer Science",
+    "Electrical Engineering"
+  ],
+  "courses": [
+    {
+      "id": "course_physics_101",
+      "title": "Quantum Mechanics & Wave Equations",
+      "subject": "Physics",
+      "description": "Comprehensive study of wave-particle duality, Schrödinger equations, and state vectors.",
+      "lessons": [
+        {
+          "id": "lesson_qm_01",
+          "title": "Introduction to Wave Functions",
+          "duration": "12:45",
+          "notes": ["quantum-mechanics-intro"],
+          "quizzes": ["quantum-mechanics-quiz"]
+        }
+      ]
+    },
+    {
+      "id": "course_cs_201",
+      "title": "Data Structures & Algorithms",
+      "subject": "Computer Science",
+      "description": "Mastering arrays, linked lists, trees, graphs, and dynamic programming.",
+      "lessons": [
+        {
+          "id": "lesson_dsa_01",
+          "title": "Array Operations & Memory Layout",
+          "duration": "15:20",
+          "notes": ["data-structures-notes"],
+          "quizzes": ["dsa-quiz"]
+        }
+      ]
+    }
+  ]
+}

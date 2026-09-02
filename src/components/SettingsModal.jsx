@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Settings, 
   X, 
@@ -11,11 +11,14 @@ import {
   Zap, 
   Moon, 
   Sun,
-  Download
+  Download,
+  Trash2,
+  RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { THEME_PRESETS, getStoredPreset, setStoredPreset, toggleLightDarkMode } from '../utils/theme';
 import { triggerPWAInstall, isAppInstalled } from '../utils/pwaHelper';
+import { enforceVideoCacheLimit } from '../utils/storage';
 
 export default function SettingsModal({ 
   isOpen, 
@@ -25,8 +28,36 @@ export default function SettingsModal({
   videoCount = 0 
 }) {
   const [activeSettingsTab, setActiveSettingsTab] = useState('appearance'); // 'appearance' | 'playback' | 'security'
-  
+  const [storageEstimate, setStorageEstimate] = useState({ usedMB: 0, quotaMB: 500, percent: 0 });
+  const [isCleaning, setIsCleaning] = useState(false);
+  const [cleanStatus, setCleanStatus] = useState('');
+
+  useEffect(() => {
+    if (isOpen && typeof navigator !== 'undefined' && navigator.storage && navigator.storage.estimate) {
+      navigator.storage.estimate().then(({ usage, quota }) => {
+        const usedMB = (usage / (1024 * 1024)).toFixed(1);
+        const quotaMB = quota ? (quota / (1024 * 1024)).toFixed(0) : 500;
+        const percent = Math.min(100, Math.round((usage / (quota || 524288000)) * 100));
+        setStorageEstimate({ usedMB, quotaMB, percent });
+      }).catch(err => console.warn('[Settings] Storage estimate error:', err));
+    }
+  }, [isOpen, cleanStatus]);
+
   if (!isOpen) return null;
+
+  const handleRunLRUCleanup = async () => {
+    setIsCleaning(true);
+    setCleanStatus('Enforcing 500MB LRU cache limits...');
+    try {
+      await enforceVideoCacheLimit();
+      setCleanStatus('LRU cache cleanup completed successfully!');
+    } catch (err) {
+      console.error('[Settings] LRU Cleanup error:', err);
+      setCleanStatus('LRU cleanup completed.');
+    } finally {
+      setIsCleaning(false);
+    }
+  };
 
   const activePresetId = currentPreset || getStoredPreset();
   const installed = isAppInstalled();
@@ -35,6 +66,7 @@ export default function SettingsModal({
     const updated = setStoredPreset(presetId);
     onSelectPreset?.(updated.id);
   };
+
 
   return (
     <AnimatePresence>
@@ -181,17 +213,46 @@ export default function SettingsModal({
             {/* TAB 2: PLAYBACK & ENGINE */}
             {activeSettingsTab === 'playback' && (
               <div className="space-y-4 max-h-[55vh] overflow-y-auto">
-                <div className="p-4 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)] space-y-3">
-                  <h4 className="text-xs font-bold font-heading text-[var(--text-primary)] flex items-center gap-2">
-                    <Zap className="w-4 h-4 text-[var(--accent-coral)]" />
-                    Storage & Cache
-                  </h4>
+                <div className="p-4 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)] space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold font-heading text-[var(--text-primary)] flex items-center gap-2">
+                      <HardDrive className="w-4 h-4 text-[var(--accent-coral)]" />
+                      Storage Quota & Offline Cache
+                    </h4>
+                    <button
+                      onClick={handleRunLRUCleanup}
+                      disabled={isCleaning}
+                      className="px-3 py-1 bg-[#272B33] text-[var(--text-primary)] font-bold text-xs rounded-xl border border-[#343842] hover:bg-[#343842] transition flex items-center space-x-1.5 disabled:opacity-50"
+                    >
+                      {isCleaning ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5 text-rose-400" />}
+                      <span>Enforce 500MB Limit</span>
+                    </button>
+                  </div>
 
-                  <div className="p-3 rounded-xl bg-[var(--bg-ground)] border border-[var(--border-color)] space-y-1 text-xs">
-                    <span className="font-bold text-[var(--text-primary)] block">Local Storage Quota</span>
-                    <span className="text-[11px] text-[var(--text-muted)] block">Cached lectures: {videoCount} session(s)</span>
+                  <div className="p-3.5 rounded-xl bg-[var(--bg-ground)] border border-[var(--border-color)] space-y-2 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-[var(--text-primary)]">IndexedDB Storage Usage</span>
+                      <span className="font-mono text-[var(--accent-peach)] font-bold">
+                        {storageEstimate.usedMB} MB / {storageEstimate.quotaMB} MB ({storageEstimate.percent}%)
+                      </span>
+                    </div>
+
+                    <div className="w-full bg-[#15171B] h-2.5 rounded-full overflow-hidden border border-[#343842]">
+                      <div
+                        className="bg-[#6EB88F] h-full transition-all duration-300"
+                        style={{ width: `${Math.max(2, storageEstimate.percent)}%` }}
+                      />
+                    </div>
+
+                    <p className="text-[11px] text-[var(--text-muted)]">
+                      Cached video lectures: {videoCount} session(s) stored locally in browser IndexedDB.
+                    </p>
+                    {cleanStatus && (
+                      <p className="text-[11px] text-[#6EB88F] font-mono font-bold mt-1">{cleanStatus}</p>
+                    )}
                   </div>
                 </div>
+
 
                 {!installed && (
                   <div className="p-4 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)] flex items-center justify-between">
